@@ -3,4 +3,5 @@ uvicorn[standard]
 pandas
 openrouteservice
 geopy
+python-multipart
 
