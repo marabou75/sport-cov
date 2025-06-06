@@ -20,7 +20,7 @@ app.add_middleware(
 )
 
 # Init services
-ORS_API_KEY = "VOTRE_CLE_API"  # À remplacer avant déploiement
+ORS_API_KEY = "5b3ce3597851110001cf624848a79956802748508b86e59d71fc9304"  # À remplacer avant déploiement
 ors_client = openrouteservice.Client(key=ORS_API_KEY)
 geolocator = Nominatim(user_agent="covoiturage_app")
 
