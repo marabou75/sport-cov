@@ -60,7 +60,9 @@ async def optimiser(file: UploadFile = File(...)):
     df = pd.read_csv(io.StringIO(content.decode("utf-8")))
 
     df['coord'] = df['Adresse de départ'].apply(geocode)
+    print(f"{df['coord'].notnull().sum()} joueurs géocodés avec     succès")
     df = df[df['coord'].notnull()].reset_index(drop=True)
+    
 
     df['duree_directe'] = [get_route_duration([c, DESTINATION_COORD]) for c in df['coord']]
     time.sleep(1)
