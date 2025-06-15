@@ -28,11 +28,23 @@ DESTINATION_COORD = [0.99193, 47.41223]
 # ---------- Utilitaires ----------
 def geocode(address):
     try:
-        print(f"→ Tentative de géocodage : {address}")
+        print(f"→ Tentative de géocodage ORS : {address}")
         response = ors_client.pelias_search(text=address)
-        return response['features'][0]['geometry']['coordinates']
+        coords = response['features'][0]['geometry']['coordinates']
+        print(f"✅ ORS OK : {coords}")
+        return coords
     except Exception as e:
-        print(f"⚠️ Échec géocodage : {address} ({e})")
+        print(f"⚠️ ORS échoué : {address} ({e}) → tentative Nominatim")
+        try:
+            loc = geolocator.geocode(address, timeout=10)
+            if loc:
+                coords = [loc.longitude, loc.latitude]
+                print(f"✅ Nominatim OK : {coords}")
+                return coords
+            else:
+                print(f"❌ Nominatim a échoué : {address}")
+        except Exception as en:
+            print(f"❌ Erreur Nominatim : {address} ({en})")
         return None
 
 def reverse_geocode(coords):
