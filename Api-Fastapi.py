@@ -67,13 +67,13 @@ async def optimiser(file: UploadFile = File(...)):
     content = await file.read()
     df = pd.read_csv(io.StringIO(content.decode("utf-8")))
 
-coords = []
-for adresse in df['Adresse de départ']:
-    print(f"→ Tentative de géocodage : {adresse}")
-    coord = geocode(adresse)
-    coords.append(coord)
-    time.sleep(1)  # Limite Nominatim : 1 requête/sec
-df['coord'] = coords
+    coords = []
+    for adresse in df['Adresse de départ']:
+        print(f"→ Tentative de géocodage : {adresse}")
+        coord = geocode(adresse)
+        coords.append(coord)
+        time.sleep(1)  # Limite Nominatim : 1 requête/sec
+    df['coord'] = coords
 
     print(f"{df['coord'].notnull().sum()} joueurs géocodés avec succès")
     df = df[df['coord'].notnull()].reset_index(drop=True)
