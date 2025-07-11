@@ -124,6 +124,10 @@ df['coord'] = coords
 # ---------- Route JSON pour Glide ----------
 @app.post("/optimiser_direct")
 async def optimiser_direct(data: dict = Body(...)):
+    print("=== DONNÉES REÇUES ===")
+    print("Players :", req.players)
+    print("Destination :", req.destination)
+    print("======================")
     print("REQUÊTE REÇUE :", req)
     print("Joueurs reçus :", req.players)
     print("Destination :", req.destination)
