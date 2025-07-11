@@ -125,13 +125,13 @@ async def optimiser(file: UploadFile = File(...)):
 @app.post("/optimiser_direct")
 async def optimiser_direct(data: dict = Body(...)):
     print("=== DONNÉES REÇUES ===")
-    print("Players :", req.players)
-    print("Destination :", req.destination)
+    print("Players :", data.get("players"))
+    print("Destination :", data.get("destination"))
     print("======================")
     print("REQUÊTE REÇUE :", req)
     print("Joueurs reçus :", req.players)
     print("Destination :", req.destination)
-    joueurs = data.get("joueurs", [])
+    joueurs = data.get("players", [])
     if not joueurs:
         return {"trajets": []}
 
