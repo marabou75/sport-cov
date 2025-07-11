@@ -8,7 +8,7 @@ from urllib.parse import quote
 import io
 
 app = FastAPI()
-
+#RAS
 # Autorise tout (pour test Glide)
 app.add_middleware(
     CORSMiddleware,
