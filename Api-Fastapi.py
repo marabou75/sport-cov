@@ -128,9 +128,6 @@ async def optimiser_direct(data: dict = Body(...)):
     print("Players :", data.get("players"))
     print("Destination :", data.get("destination"))
     print("======================")
-    print("REQUÊTE REÇUE :", req)
-    print("Joueurs reçus :", req.players)
-    print("Destination :", req.destination)
     joueurs = data.get("players", [])
     if not joueurs:
         return {"trajets": []}
