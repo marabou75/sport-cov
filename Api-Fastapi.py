@@ -9,7 +9,7 @@ import io
 
 app = FastAPI()
 
-# Autorise tout (pour test Glide)
+# Autoriser toutes les origines (utile pour Glide)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,12 +18,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Init services
+# Initialisation des services
 ORS_API_KEY = "ta_clé_API_ORS"
 ors_client = openrouteservice.Client(key=ORS_API_KEY)
 geolocator = Nominatim(user_agent="covoiturage_app")
-
-DESTINATION_COORD = [0.99193, 47.41223]
 
 # ---------- Utilitaires ----------
 def geocode(address):
@@ -61,67 +59,7 @@ def get_route_duration(coords):
     except:
         return float('inf')
 
-# ---------- Route CSV ----------
-@app.post("/optimiser")
-async def optimiser(file: UploadFile = File(...)):
-    content = await file.read()
-    df = pd.read_csv(io.StringIO(content.decode("utf-8")))
-
-    coords = []
-    for adresse in df['Adresse de départ']:
-        print(f"→ Tentative de géocodage : {adresse}")
-        coord = geocode(adresse)
-        coords.append(coord)
-        time.sleep(1)
-    df['coord'] = coords
-
-    print(f"{df['coord'].notnull().sum()} joueurs géocodés avec succès")
-    df = df[df['coord'].notnull()].reset_index(drop=True)
-    df['duree_directe'] = [get_route_duration([c, DESTINATION_COORD]) for c in df['coord']]
-    time.sleep(1)
-
-    groupes = []
-    utilises = set()
-    for _, row in df.iterrows():
-        if row['Nom'] in utilises:
-            continue
-        conducteur = row
-        groupe = [conducteur['Nom']]
-        coords_groupe = [conducteur['coord']]
-        utilises.add(conducteur['Nom'])
-        duree_base = conducteur['duree_directe']
-        candidats = df[~df['Nom'].isin(utilises)].copy()
-        for _, passenger in candidats.iterrows():
-            trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
-            duree_group = get_route_duration(trajet)
-            if duree_group <= duree_base * 1.5:
-                groupe.append(passenger['Nom'])
-                coords_groupe.append(passenger['coord'])
-                utilises.add(passenger['Nom'])
-            if len(groupe) >= 4:
-                break
-            time.sleep(1)
-        groupes.append((groupe, coords_groupe))
-
-    result = []
-    for i, (noms, coords) in enumerate(groupes, 1):
-        all_coords = coords + [DESTINATION_COORD]
-        adresses = [reverse_geocode(c) for c in all_coords]
-        origin = quote(adresses[0])
-        destination = quote(adresses[-1])
-        waypoints = "|".join([quote(a) for a in adresses[1:-1]])
-        gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
-        result.append({
-            "voiture": f"Voiture {i}",
-            "conducteur": noms[0],
-            "passagers": noms[1:] if len(noms) > 1 else [],
-            "ordre": " → ".join(adresses),
-            "google_maps": gmaps_url
-        })
-
-    return {"trajets": result}
-
-# ---------- Route JSON pour Glide ----------
+# ---------- Route JSON (pour Glide) ----------
 @app.post("/optimiser_direct")
 async def optimiser_direct(data: dict = Body(...)):
     print("=== DONNÉES REÇUES ===")
@@ -130,40 +68,56 @@ async def optimiser_direct(data: dict = Body(...)):
     print("======================")
 
     joueurs = data.get("players", [])
-    if not joueurs:
+    destination = data.get("destination", "").strip()
+
+    if not joueurs or not destination:
         return {"trajets": []}
 
-    # Conversion des données JSON en DataFrame avec noms corrects
-    df = pd.DataFrame(joueurs)
-    df = df.rename(columns={"name": "Nom", "address": "Adresse de départ"})
+    # Géocodage de la destination dynamique
+    DESTINATION_COORD = geocode(destination)
+    if not DESTINATION_COORD:
+        return {"error": "Échec du géocodage de la destination."}
 
-    df['coord'] = df['Adresse de départ'].apply(geocode)
+    # Construction du DataFrame
+    df = pd.DataFrame(joueurs)
+    df['coord'] = df['address'].apply(geocode)
+    df['rotation'] = df.get('rotation', 'moyen')  # par défaut
     print(f"{df['coord'].notnull().sum()} joueurs géocodés (direct)")
+
     df = df[df['coord'].notnull()].reset_index(drop=True)
     df['duree_directe'] = [get_route_duration([c, DESTINATION_COORD]) for c in df['coord']]
     time.sleep(1)
 
+    # Priorité de conducteur selon rotation
+    def score_rotation(rotation):
+        return {"souvent": 0, "moyen": 1, "rare": 2}.get(rotation, 1)
+
+    df = df.sort_values(by="rotation", key=lambda col: col.map(score_rotation)).reset_index(drop=True)
+
     groupes = []
     utilises = set()
+
     for _, row in df.iterrows():
-        if row['Nom'] in utilises:
+        if row['name'] in utilises:
             continue
         conducteur = row
-        groupe = [conducteur['Nom']]
+        groupe = [conducteur['name']]
         coords_groupe = [conducteur['coord']]
-        utilises.add(conducteur['Nom'])
+        utilises.add(conducteur['name'])
         duree_base = conducteur['duree_directe']
-        candidats = df[~df['Nom'].isin(utilises)].copy()
+
+        candidats = df[~df['name'].isin(utilises)].copy()
         for _, passenger in candidats.iterrows():
             trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
             duree_group = get_route_duration(trajet)
             if duree_group <= duree_base * 1.5:
-                groupe.append(passenger['Nom'])
+                groupe.append(passenger['name'])
                 coords_groupe.append(passenger['coord'])
-                utilises.add(passenger['Nom'])
+                utilises.add(passenger['name'])
             if len(groupe) >= 4:
                 break
             time.sleep(1)
+
         groupes.append((groupe, coords_groupe))
 
     result = []
