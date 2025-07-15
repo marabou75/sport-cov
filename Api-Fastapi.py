@@ -9,7 +9,7 @@ import io
 
 app = FastAPI()
 
-# Autorise tout (pour test Glide)
+# Autorise  tout (pour test Glide)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
