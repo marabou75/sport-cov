@@ -9,7 +9,7 @@ import io
 
 app = FastAPI()
 
-# Autorise  tout (pour test Glide)
+# Autorise tout (pour test Glide)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -72,7 +72,7 @@ async def optimiser(file: UploadFile = File(...)):
         print(f"→ Tentative de géocodage : {adresse}")
         coord = geocode(adresse)
         coords.append(coord)
-        time.sleep(1)  # Limite Nominatim : 1 requête/sec
+        time.sleep(1)
     df['coord'] = coords
 
     print(f"{df['coord'].notnull().sum()} joueurs géocodés avec succès")
@@ -124,5 +124,63 @@ async def optimiser(file: UploadFile = File(...)):
 # ---------- Route JSON pour Glide ----------
 @app.post("/optimiser_direct")
 async def optimiser_direct(data: dict = Body(...)):
-    print("=== DON
+    print("=== DONNÉES REÇUES ===")
+    print("Players :", data.get("players"))
+    print("Destination :", data.get("destination"))
+    print("======================")
+
+    joueurs = data.get("players", [])
+    if not joueurs:
+        return {"trajets": []}
+
+    # Conversion des données JSON en DataFrame avec noms corrects
+    df = pd.DataFrame(joueurs)
+    df = df.rename(columns={"name": "Nom", "address": "Adresse de départ"})
+
+    df['coord'] = df['Adresse de départ'].apply(geocode)
+    print(f"{df['coord'].notnull().sum()} joueurs géocodés (direct)")
+    df = df[df['coord'].notnull()].reset_index(drop=True)
+    df['duree_directe'] = [get_route_duration([c, DESTINATION_COORD]) for c in df['coord']]
+    time.sleep(1)
+
+    groupes = []
+    utilises = set()
+    for _, row in df.iterrows():
+        if row['Nom'] in utilises:
+            continue
+        conducteur = row
+        groupe = [conducteur['Nom']]
+        coords_groupe = [conducteur['coord']]
+        utilises.add(conducteur['Nom'])
+        duree_base = conducteur['duree_directe']
+        candidats = df[~df['Nom'].isin(utilises)].copy()
+        for _, passenger in candidats.iterrows():
+            trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
+            duree_group = get_route_duration(trajet)
+            if duree_group <= duree_base * 1.5:
+                groupe.append(passenger['Nom'])
+                coords_groupe.append(passenger['coord'])
+                utilises.add(passenger['Nom'])
+            if len(groupe) >= 4:
+                break
+            time.sleep(1)
+        groupes.append((groupe, coords_groupe))
+
+    result = []
+    for i, (noms, coords) in enumerate(groupes, 1):
+        all_coords = coords + [DESTINATION_COORD]
+        adresses = [reverse_geocode(c) for c in all_coords]
+        origin = quote(adresses[0])
+        destination = quote(adresses[-1])
+        waypoints = "|".join([quote(a) for a in adresses[1:-1]])
+        gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
+        result.append({
+            "voiture": f"Voiture {i}",
+            "conducteur": noms[0],
+            "passagers": noms[1:] if len(noms) > 1 else [],
+            "ordre": " → ".join(adresses),
+            "google_maps": gmaps_url
+        })
+
+    return {"trajets": result}
 
