@@ -69,6 +69,7 @@ async def optimiser_direct(data: dict = Body(...)):
 
     joueurs = data.get("players", [])
     destination = data.get("destination", "").strip()
+    #max_detour_ratio = data.get("max_detour_ratio", 1.5)
 
     if not joueurs or not destination:
         return {"trajets": []}
@@ -110,7 +111,7 @@ async def optimiser_direct(data: dict = Body(...)):
         for _, passenger in candidats.iterrows():
             trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
             duree_group = get_route_duration(trajet)
-            if duree_group <= duree_base * 1.5:
+            if duree_group <= duree_base * 1.8:
                 groupe.append(passenger['name'])
                 coords_groupe.append(passenger['coord'])
                 utilises.add(passenger['name'])
