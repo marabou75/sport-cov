@@ -111,7 +111,7 @@ async def optimiser_direct(data: dict = Body(...)):
         for _, passenger in candidats.iterrows():
             trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
             duree_group = get_route_duration(trajet)
-            if duree_group <= duree_base * 1.8:
+            if duree_group <= duree_base * 2:
                 groupe.append(passenger['name'])
                 coords_groupe.append(passenger['coord'])
                 utilises.add(passenger['name'])
