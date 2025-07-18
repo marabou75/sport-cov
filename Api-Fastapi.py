@@ -113,7 +113,7 @@ async def optimiser_direct(data: dict = Body(...)):
             trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
             duree_group = get_route_duration(trajet)
             print(f" ✅ Test {passenger['name']} : {duree_group}s (limite : {duree_base * 1.8}s)")
-            if duree_group <= duree_base * 1.8:
+            if duree_group <= duree_base * 1.5:
                 groupe.append(passenger['name'])
                 coords_groupe.append(passenger['coord'])
                 utilises.add(passenger['name'])
