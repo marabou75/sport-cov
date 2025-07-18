@@ -98,9 +98,30 @@ async def optimiser_direct(data: dict = Body(...)):
     groupes = []
     utilises = set()
 
-    for _, row in df.iterrows():
-        if row['name'] in utilises:
-            continue
+    while True:
+    candidats_conducteurs = df[~df['name'].isin(utilises)]
+    if candidats_conducteurs.empty:
+        break
+
+    conducteur = candidats_conducteurs.iloc[0]
+    groupe = [conducteur['name']]
+    coords_groupe = [conducteur['coord']]
+    utilises.add(conducteur['name'])
+    duree_base = conducteur['duree_directe']
+
+    candidats_passagers = df[~df['name'].isin(utilises)].copy()
+    for _, passenger in candidats_passagers.iterrows():
+        trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
+        duree_group = get_route_duration(trajet)
+        if duree_group <= duree_base * 1.8:  # ou 2
+            groupe.append(passenger['name'])
+            coords_groupe.append(passenger['coord'])
+            utilises.add(passenger['name'])
+        if len(groupe) >= 4:
+            break
+        time.sleep(1)
+
+    groupes.append((groupe, coords_groupe))
         conducteur = row
         groupe = [conducteur['name']]
         coords_groupe = [conducteur['coord']]
