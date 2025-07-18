@@ -1,15 +1,14 @@
-from fastapi import FastAPI, UploadFile, File, Body
+from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
-import openrouteservice
+import googlemaps
 import time
 from geopy.geocoders import Nominatim
 from urllib.parse import quote
-import io
 
 app = FastAPI()
 
-# Autoriser toutes les origines (utile pour Glide)
+# CORS pour Glide
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,32 +17,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialisation des services
-ORS_API_KEY = "ta_clé_API_ORS"
-ors_client = openrouteservice.Client(key=ORS_API_KEY)
+# ✅ Ta clé Google Maps API ici
+GMAPS_API_KEY = "AIzaSyDQWbksRp8BE1UFzsXjBFPOf8v1Ls4f2u0"
+gmaps = googlemaps.Client(key=GMAPS_API_KEY)
 geolocator = Nominatim(user_agent="covoiturage_app")
 
-# ---------- Utilitaires ----------
+# ✅ Fonction de géocodage avec Google
 def geocode(address):
     try:
-        print(f"→ Tentative de géocodage ORS : {address}")
-        response = ors_client.pelias_search(text=address)
-        coords = response['features'][0]['geometry']['coordinates']
-        print(f"✅ ORS OK : {coords}")
-        return coords
+        result = gmaps.geocode(address)
+        if result:
+            loc = result[0]['geometry']['location']
+            return [loc['lng'], loc['lat']]
     except Exception as e:
-        print(f"⚠️ ORS échoué : {address} ({e}) → tentative Nominatim")
-        try:
-            loc = geolocator.geocode(address, timeout=10)
-            if loc:
-                coords = [loc.longitude, loc.latitude]
-                print(f"✅ Nominatim OK : {coords}")
-                return coords
-            else:
-                print(f"❌ Nominatim a échoué : {address}")
-        except Exception as en:
-            print(f"❌ Erreur Nominatim : {address} ({en})")
-        return None
+        print(f"❌ Erreur geocode Google : {e}")
+    return None
 
 def reverse_geocode(coords):
     try:
@@ -52,14 +40,24 @@ def reverse_geocode(coords):
     except:
         return f"{coords[1]},{coords[0]}"
 
+# ✅ Fonction durée trajet avec Google Directions
 def get_route_duration(coords):
     try:
-        route = ors_client.directions(coords, profile='driving-car')
-        return route['routes'][0]['summary']['duration']
-    except:
-        return float('inf')
+        origin = f"{coords[0][1]},{coords[0][0]}"
+        destination = f"{coords[-1][1]},{coords[-1][0]}"
+        waypoints = [f"{c[1]},{c[0]}" for c in coords[1:-1]]
+        result = gmaps.directions(
+            origin=origin,
+            destination=destination,
+            waypoints=waypoints,
+            mode="driving"
+        )
+        if result:
+            return result[0]['legs'][0]['duration']['value']
+    except Exception as e:
+        print(f"❌ Erreur Google Directions : {e}")
+    return float('inf')
 
-# ---------- Route JSON (pour Glide) ----------
 @app.post("/optimiser_direct")
 async def optimiser_direct(data: dict = Body(...)):
     print("=== DONNÉES REÇUES ===")
@@ -73,22 +71,19 @@ async def optimiser_direct(data: dict = Body(...)):
     if not joueurs or not destination:
         return {"trajets": []}
 
-    # Géocodage de la destination dynamique
     DESTINATION_COORD = geocode(destination)
     if not DESTINATION_COORD:
         return {"error": "Échec du géocodage de la destination."}
 
-    # Construction du DataFrame
     df = pd.DataFrame(joueurs)
     df['coord'] = df['address'].apply(geocode)
-    df['rotation'] = df.get('rotation', 'moyen')  # par défaut
-    print(f"{df['coord'].notnull().sum()} joueurs géocodés (direct)")
+    df['rotation'] = df.get('rotation', 'moyen')
+    print(f"{df['coord'].notnull().sum()} joueurs géocodés")
 
     df = df[df['coord'].notnull()].reset_index(drop=True)
     df['duree_directe'] = [get_route_duration([c, DESTINATION_COORD]) for c in df['coord']]
     time.sleep(1)
 
-    # Priorité de conducteur selon rotation
     def score_rotation(rotation):
         return {"souvent": 0, "moyen": 1, "rare": 2}.get(rotation, 1)
 
@@ -106,20 +101,17 @@ async def optimiser_direct(data: dict = Body(...)):
         utilises.add(conducteur['name'])
         duree_base = conducteur['duree_directe']
 
-        print(f"\n🚗 Nouveau conducteur : {conducteur['name']} (durée directe : {duree_base:.0f}s)")
+        print(f"\n🚗 Nouveau conducteur : {conducteur['name']} (durée directe : {duree_base}s)")
 
         candidats = df[~df['name'].isin(utilises)].copy()
         for _, passenger in candidats.iterrows():
             trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
             duree_group = get_route_duration(trajet)
-            limite = duree_base * 1.8
-            if duree_group <= limite:
-                print(f" ✅ {passenger['name']} accepté (détour : {duree_group:.0f}s ≤ {limite:.0f}s)")
+            print(f" ✅ Test {passenger['name']} : {duree_group}s (limite : {duree_base * 1.8}s)")
+            if duree_group <= duree_base * 1.8:
                 groupe.append(passenger['name'])
                 coords_groupe.append(passenger['coord'])
                 utilises.add(passenger['name'])
-            else:
-                print(f" ❌ {passenger['name']} refusé (détour : {duree_group:.0f}s > {limite:.0f}s)")
             if len(groupe) >= 4:
                 print(" 🛑 Voiture pleine (4 places)")
                 break
@@ -127,7 +119,6 @@ async def optimiser_direct(data: dict = Body(...)):
 
         groupes.append((groupe, coords_groupe))
 
-    # Création des trajets
     result = []
     for i, (noms, coords) in enumerate(groupes, 1):
         all_coords = coords + [DESTINATION_COORD]
@@ -144,12 +135,5 @@ async def optimiser_direct(data: dict = Body(...)):
             "google_maps": gmaps_url
         })
 
-    # 🔍 Bonus : joueurs non utilisés
-    non_utilises = [j for j in df['name'] if j not in utilises]
-    print(f"\n❌ Joueurs non utilisés : {non_utilises}")
-
-    return {
-        "trajets": result,
-        "exclus": non_utilises
-    }
+    return {"trajets": result}
 
