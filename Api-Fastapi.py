@@ -22,7 +22,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Ta clé Google Maps API ici
+# Ta clé Google Maps API ici
 GMAPS_API_KEY = os.getenv("GOOGLE_API_KEY")
 gmaps = googlemaps.Client(key=GMAPS_API_KEY)
 geolocator = Nominatim(user_agent="covoiturage_app")
