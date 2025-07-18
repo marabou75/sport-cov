@@ -1,3 +1,8 @@
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
 from fastapi import FastAPI, Body
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -18,7 +23,7 @@ app.add_middleware(
 )
 
 # ✅ Ta clé Google Maps API ici
-GMAPS_API_KEY = "AIzaSyDQWbksRp8BE1UFzsXjBFPOf8v1Ls4f2u0"
+GMAPS_API_KEY = os.getenv("GOOGLE_API_KEY")
 gmaps = googlemaps.Client(key=GMAPS_API_KEY)
 geolocator = Nominatim(user_agent="covoiturage_app")
 
