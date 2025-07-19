@@ -27,6 +27,18 @@ GMAPS_API_KEY = os.getenv("GOOGLE_API_KEY")
 gmaps = googlemaps.Client(key=GMAPS_API_KEY)
 geolocator = Nominatim(user_agent="covoiturage_app")
 
+def nettoyer_adresse(adresse: str) -> str:
+    segments_inutiles = [
+        "France",
+        "France métropolitaine",
+        "Centre-Val de Loire",
+        "Indre-et-Loire",
+        "Loches"
+    ]
+    parties = [part.strip() for part in adresse.split()]
+    parties_utiles = [part for part in parties if part not in segments_inutiles]
+    return " ".join(parties_utiles)
+
 # ✅ Fonction de géocodage avec Google
 def geocode(address):
     try:
@@ -41,9 +53,11 @@ def geocode(address):
 def reverse_geocode(coords):
     try:
         loc = geolocator.reverse((coords[1], coords[0]), timeout=10)
-        return loc.address.replace(",", "")
+        adresse_brute = loc.address.replace(",", "")
+        return nettoyer_adresse(adresse_brute)
     except:
         return f"{coords[1]},{coords[0]}"
+
 
 # ✅ Fonction durée trajet avec Google Directions
 def get_route_duration(coords):
