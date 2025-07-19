@@ -22,22 +22,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Ta clé Google Maps API ici
+# Clé Google Maps API
 GMAPS_API_KEY = os.getenv("GOOGLE_API_KEY")
 gmaps = googlemaps.Client(key=GMAPS_API_KEY)
 geolocator = Nominatim(user_agent="covoiturage_app")
-
-def nettoyer_adresse(adresse: str) -> str:
-    segments_inutiles = [
-        "France",
-        "France métropolitaine",
-        "Centre-Val de Loire",
-        "Indre-et-Loire",
-        "Loches"
-    ]
-    parties = [part.strip() for part in adresse.split()]
-    parties_utiles = [part for part in parties if part not in segments_inutiles]
-    return " ".join(parties_utiles)
 
 # ✅ Fonction de géocodage avec Google
 def geocode(address):
@@ -50,32 +38,31 @@ def geocode(address):
         print(f"❌ Erreur geocode Google : {e}")
     return None
 
+# ✅ Fonction reverse geocoding nettoyée
 def reverse_geocode(coords):
     try:
         loc = geolocator.reverse((coords[1], coords[0]), timeout=10)
-        if not loc:
-            return f"{coords[1]},{coords[0]}"
-        address = loc.address
+        if loc and loc.address:
+            address = loc.address
 
-        # ✅ Nettoyage : on enlève certains éléments inutiles
-        segments_to_remove = [
-            "Loches", 
-            "Indre-et-Loire", 
-            "Centre-Val de Loire", 
-            "France métropolitaine", 
-            "France"
-        ]
-        for seg in segments_to_remove:
-            address = address.replace(seg, "")
-        
-        # Nettoyage supplémentaire
-        address = address.replace("  ", " ").strip(" ,→")
+            # Nettoyage : on enlève certains éléments inutiles
+            segments_to_remove = [
+                "Loches", 
+                "Indre-et-Loire", 
+                "Centre-Val de Loire", 
+                "France métropolitaine", 
+                "France"
+            ]
+            for seg in segments_to_remove:
+                address = address.replace(seg, "")
+            
+            # Nettoyage supplémentaire
+            address = address.replace("  ", " ").strip(" ,→")
 
-        return address
-    except:
-        return f"{coords[1]},{coords[0]}"
-
-
+            return address
+    except Exception as e:
+        print(f"❌ Reverse geocoding échoué : {e}")
+    return f"{coords[1]},{coords[0]}"
 
 # ✅ Fonction durée trajet avec Google Directions
 def get_route_duration(coords):
@@ -160,10 +147,13 @@ async def optimiser_direct(data: dict = Body(...)):
     for i, (noms, coords) in enumerate(groupes, 1):
         all_coords = coords + [DESTINATION_COORD]
         adresses = [reverse_geocode(c) for c in all_coords]
+        print("Adresses reverse geocodées :", adresses)
+
         origin = quote(adresses[0])
         destination = quote(adresses[-1])
         waypoints = "|".join([quote(a) for a in adresses[1:-1]])
         gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
+
         result.append({
             "voiture": f"Voiture {i}",
             "conducteur": noms[0],
