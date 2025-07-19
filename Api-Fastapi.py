@@ -53,10 +53,28 @@ def geocode(address):
 def reverse_geocode(coords):
     try:
         loc = geolocator.reverse((coords[1], coords[0]), timeout=10)
-        adresse_brute = loc.address.replace(",", "")
-        return nettoyer_adresse(adresse_brute)
+        if not loc:
+            return f"{coords[1]},{coords[0]}"
+        address = loc.address
+
+        # ✅ Nettoyage : on enlève certains éléments inutiles
+        segments_to_remove = [
+            "Loches", 
+            "Indre-et-Loire", 
+            "Centre-Val de Loire", 
+            "France métropolitaine", 
+            "France"
+        ]
+        for seg in segments_to_remove:
+            address = address.replace(seg, "")
+        
+        # Nettoyage supplémentaire
+        address = address.replace("  ", " ").strip(" ,→")
+
+        return address
     except:
         return f"{coords[1]},{coords[0]}"
+
 
 
 # ✅ Fonction durée trajet avec Google Directions
