@@ -122,9 +122,9 @@ async def optimiser_direct(data: dict = Body(...)):
                 coords_groupe.append(passenger['coord'])
                 utilises.add(passenger['name'])
             else:
-                # Test avec marche à pied (200m max)
+                # Test avec marche à pied (1000m max)
                 distance = haversine(passenger['coord'], conducteur['coord'])
-                if distance <= 200:
+                if distance <= 1000:
                     marche_url = get_walking_url(passenger['coord'], conducteur['coord'])
                     groupe.append({
                         "nom": passenger['name'],
