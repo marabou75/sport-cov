@@ -9,8 +9,8 @@ import pandas as pd
 import googlemaps
 import time
 from geopy.geocoders import Nominatim
-from geopy.distance import geodesic
 from urllib.parse import quote
+from math import radians, cos, sin, sqrt, atan2
 
 app = FastAPI()
 
@@ -26,7 +26,18 @@ GMAPS_API_KEY = os.getenv("GOOGLE_API_KEY")
 gmaps = googlemaps.Client(key=GMAPS_API_KEY)
 geolocator = Nominatim(user_agent="covoiturage_app")
 
-# --- FONCTIONS UTILES ---
+# ✅ Haversine pour calculer distance entre deux coordonnées
+EARTH_RADIUS = 6371000  # en mètres
+
+def haversine(coord1, coord2):
+    lon1, lat1 = map(radians, coord1)
+    lon2, lat2 = map(radians, coord2)
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return EARTH_RADIUS * c
+
 def geocode(address):
     try:
         result = gmaps.geocode(address)
@@ -42,9 +53,7 @@ def reverse_geocode(coords):
         loc = geolocator.reverse((coords[1], coords[0]), timeout=10)
         if loc and loc.address:
             address = loc.address
-            segments_to_remove = [
-                "Loches", "Indre-et-Loire", "Centre-Val de Loire", "France métropolitaine", "France"
-            ]
+            segments_to_remove = ["Loches", "Indre-et-Loire", "Centre-Val de Loire", "France métropolitaine", "France"]
             for seg in segments_to_remove:
                 address = address.replace(seg, "")
             return address.replace("  ", " ").strip(" ,→")
@@ -57,29 +66,20 @@ def get_route_duration(coords):
         origin = f"{coords[0][1]},{coords[0][0]}"
         destination = f"{coords[-1][1]},{coords[-1][0]}"
         waypoints = [f"{c[1]},{c[0]}" for c in coords[1:-1]]
-        result = gmaps.directions(
-            origin=origin,
-            destination=destination,
-            waypoints=waypoints,
-            mode="driving"
-        )
+        result = gmaps.directions(origin=origin, destination=destination, waypoints=waypoints, mode="driving")
         if result:
             return result[0]['legs'][0]['duration']['value']
     except Exception as e:
         print(f"❌ Erreur Google Directions : {e}")
     return float('inf')
 
-def est_dans_rayon(p1, p2, rayon_m=200):
-    return geodesic((p1[1], p1[0]), (p2[1], p2[0])).meters <= rayon_m
+def get_walking_url(origin_coord, dest_coord):
+    origin = f"{origin_coord[1]},{origin_coord[0]}"
+    dest = f"{dest_coord[1]},{dest_coord[0]}"
+    return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={dest}&travelmode=walking"
 
-# --- ROUTE PRINCIPALE ---
 @app.post("/optimiser_direct")
 async def optimiser_direct(data: dict = Body(...)):
-    print("=== DONNÉES REÇUES ===")
-    print("Players :", data.get("players"))
-    print("Destination :", data.get("destination"))
-    print("======================")
-
     joueurs = data.get("players", [])
     destination = data.get("destination", "").strip()
     if not joueurs or not destination:
@@ -92,8 +92,6 @@ async def optimiser_direct(data: dict = Body(...)):
     df = pd.DataFrame(joueurs)
     df['coord'] = df['address'].apply(geocode)
     df['rotation'] = df.get('rotation', 'moyen')
-    print(f"{df['coord'].notnull().sum()} joueurs géocodés")
-
     df = df[df['coord'].notnull()].reset_index(drop=True)
     df['duree_directe'] = [get_route_duration([c, DESTINATION_COORD]) for c in df['coord']]
     time.sleep(1)
@@ -110,43 +108,46 @@ async def optimiser_direct(data: dict = Body(...)):
         if row['name'] in utilises:
             continue
         conducteur = row
-        groupe = [conducteur['name']]
+        groupe = [{"nom": conducteur['name'], "marche": False}]
         coords_groupe = [conducteur['coord']]
         utilises.add(conducteur['name'])
         duree_base = conducteur['duree_directe']
 
-        print(f"\n🚗 Nouveau conducteur : {conducteur['name']} (durée directe : {duree_base}s)")
-
         candidats = df[~df['name'].isin(utilises)].copy()
         for _, passenger in candidats.iterrows():
-            coord_passager = passenger['coord']
-
-            # 🚶 Vérifie si passager est à moins de 200m d'un point du trajet
-            proche = any(est_dans_rayon(coord_passager, c) for c in coords_groupe)
-            coords_test = coords_groupe + [coord_passager, DESTINATION_COORD] if not proche else coords_groupe + [DESTINATION_COORD]
-
-            duree_group = get_route_duration(coords_test)
-            print(f" ✅ Test {passenger['name']} : {duree_group}s (limite : {duree_base * 1.3}s)")
-
+            trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
+            duree_group = get_route_duration(trajet)
             if duree_group <= duree_base * 1.3:
-                groupe.append(passenger['name'])
-                if not proche:
-                    coords_groupe.append(coord_passager)
+                groupe.append({"nom": passenger['name'], "marche": False})
+                coords_groupe.append(passenger['coord'])
                 utilises.add(passenger['name'])
+            else:
+                # Test avec marche à pied (200m max)
+                distance = haversine(passenger['coord'], conducteur['coord'])
+                if distance <= 200:
+                    marche_url = get_walking_url(passenger['coord'], conducteur['coord'])
+                    groupe.append({
+                        "nom": passenger['name'],
+                        "marche": True,
+                        "rendez_vous": {
+                            "coord": conducteur['coord'],
+                            "adresse": reverse_geocode(conducteur['coord']),
+                            "marche_maps_url": marche_url
+                        }
+                    })
+                    coords_groupe.append(conducteur['coord'])
+                    utilises.add(passenger['name'])
 
             if len(groupe) >= 4:
-                print(" 🛑 Voiture pleine (4 places)")
                 break
             time.sleep(1)
 
         groupes.append((groupe, coords_groupe))
 
     result = []
-    for i, (noms, coords) in enumerate(groupes, 1):
+    for i, (groupe, coords) in enumerate(groupes, 1):
         all_coords = coords + [DESTINATION_COORD]
         adresses = [reverse_geocode(c) for c in all_coords]
-        print("Adresses reverse geocodées :", adresses)
-
         origin = quote(adresses[0])
         destination = quote(adresses[-1])
         waypoints = "|".join([quote(a) for a in adresses[1:-1]])
@@ -154,10 +155,11 @@ async def optimiser_direct(data: dict = Body(...)):
 
         result.append({
             "voiture": f"Voiture {i}",
-            "conducteur": noms[0],
-            "passagers": noms[1:] if len(noms) > 1 else [],
+            "conducteur": groupe[0]['nom'],
+            "passagers": groupe[1:],
             "ordre": " → ".join(adresses),
             "google_maps": gmaps_url
         })
 
     return {"trajets": result}
+
