@@ -10,7 +10,6 @@ import googlemaps
 import time
 from geopy.geocoders import Nominatim
 from urllib.parse import quote
-from math import radians, cos, sin, sqrt, atan2
 
 app = FastAPI()
 
@@ -26,17 +25,7 @@ GMAPS_API_KEY = os.getenv("GOOGLE_API_KEY")
 gmaps = googlemaps.Client(key=GMAPS_API_KEY)
 geolocator = Nominatim(user_agent="covoiturage_app")
 
-# ✅ Haversine pour calculer distance entre deux coordonnées
-EARTH_RADIUS = 6371000  # en mètres
-
-def haversine(coord1, coord2):
-    lon1, lat1 = map(radians, coord1)
-    lon2, lat2 = map(radians, coord2)
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
-    c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return EARTH_RADIUS * c
+# Fonction de geocodage
 
 def geocode(address):
     try:
@@ -45,9 +34,10 @@ def geocode(address):
             loc = result[0]['geometry']['location']
             return [loc['lng'], loc['lat']]
     except Exception as e:
-        print(f"❌ Erreur geocode Google : {e}")
+        print(f"Erreur geocode Google : {e}")
     return None
 
+# Reverse geocoding nettoyé
 def reverse_geocode(coords):
     try:
         loc = geolocator.reverse((coords[1], coords[0]), timeout=10)
@@ -58,9 +48,10 @@ def reverse_geocode(coords):
                 address = address.replace(seg, "")
             return address.replace("  ", " ").strip(" ,→")
     except Exception as e:
-        print(f"❌ Reverse geocoding échoué : {e}")
+        print(f"Reverse geocoding échoué : {e}")
     return f"{coords[1]},{coords[0]}"
 
+# Durée de trajet Google Maps
 def get_route_duration(coords):
     try:
         origin = f"{coords[0][1]},{coords[0][0]}"
@@ -70,13 +61,8 @@ def get_route_duration(coords):
         if result:
             return result[0]['legs'][0]['duration']['value']
     except Exception as e:
-        print(f"❌ Erreur Google Directions : {e}")
+        print(f"Erreur Google Directions : {e}")
     return float('inf')
-
-def get_walking_url(origin_coord, dest_coord):
-    origin = f"{origin_coord[1]},{origin_coord[0]}"
-    dest = f"{dest_coord[1]},{dest_coord[0]}"
-    return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={dest}&travelmode=walking"
 
 @app.post("/optimiser_direct")
 async def optimiser_direct(data: dict = Body(...)):
@@ -117,26 +103,25 @@ async def optimiser_direct(data: dict = Body(...)):
         for _, passenger in candidats.iterrows():
             trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
             duree_group = get_route_duration(trajet)
-            if duree_group <= duree_base * 1.1:
+            if duree_group <= duree_base * 1.3:
                 groupe.append({"nom": passenger['name'], "marche": False})
                 coords_groupe.append(passenger['coord'])
                 utilises.add(passenger['name'])
-            else:
-                # Test avec marche à pied (1000m max)
-                distance = haversine(passenger['coord'], conducteur['coord'])
-                if distance <= 1000:
-                    marche_url = get_walking_url(passenger['coord'], conducteur['coord'])
-                    groupe.append({
-                        "nom": passenger['name'],
-                        "marche": True,
-                        "rendez_vous": {
-                            "coord": conducteur['coord'],
-                            "adresse": reverse_geocode(conducteur['coord']),
-                            "marche_maps_url": marche_url
-                        }
-                    })
-                    coords_groupe.append(conducteur['coord'])
-                    utilises.add(passenger['name'])
+            # else: # Option marche à pied temporairement désactivée
+            #     distance = haversine(passenger['coord'], conducteur['coord'])
+            #     if distance <= 200:
+            #         marche_url = get_walking_url(passenger['coord'], conducteur['coord'])
+            #         groupe.append({
+            #             "nom": passenger['name'],
+            #             "marche": True,
+            #             "rendez_vous": {
+            #                 "coord": conducteur['coord'],
+            #                 "adresse": reverse_geocode(conducteur['coord']),
+            #                 "marche_maps_url": marche_url
+            #             }
+            #         })
+            #         coords_groupe.append(conducteur['coord'])
+            #         utilises.add(passenger['name'])
 
             if len(groupe) >= 4:
                 break
