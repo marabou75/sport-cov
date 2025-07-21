@@ -131,12 +131,17 @@ async def optimiser_direct(data: dict = Body(...)):
 
     result = []
     for i, (groupe, coords) in enumerate(groupes, 1):
-        all_coords = coords + [DESTINATION_COORD]
-        adresses = [reverse_geocode(c) for c in all_coords]
+        # → On récupère les adresses exactes à partir de df (plutôt que reverse_geocode)
+        noms_du_groupe = [membre['nom'] for membre in groupe]
+        adresses = df[df['name'].isin(noms_du_groupe)]['address'].tolist() + [destination]
+
+        # Nettoyage des adresses (enlève virgules multiples, espaces inutiles)
+        adresses = [", ".join(filter(None, map(str.strip, adresse.split(',')))) for adresse in adresses]
+
         origin = quote(adresses[0])
-        destination = quote(adresses[-1])
+        destination_enc = quote(adresses[-1])
         waypoints = "|".join([quote(a) for a in adresses[1:-1]])
-        gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
+        gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination_enc}&waypoints={waypoints}"
 
         result.append({
             "voiture": f"Voiture {i}",
