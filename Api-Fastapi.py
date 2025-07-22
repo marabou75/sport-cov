@@ -1,155 +1,143 @@
-from dotenv import load_dotenv
-import os
 
-load_dotenv()
-
-from fastapi import FastAPI, Body
-from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
-import googlemaps
-import time
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel
+from typing import List, Dict, Optional
+import openrouteservice
+from openrouteservice import convert
 from geopy.geocoders import Nominatim
-from urllib.parse import quote
+import urllib.parse
 
 app = FastAPI()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+ORS_API_KEY = "your_openrouteservice_api_key"  # Remplacer par votre clé OpenRouteService
+ors_client = openrouteservice.Client(key=ORS_API_KEY)
+geolocator = Nominatim(user_agent="carpooling_app")
 
-GMAPS_API_KEY = os.getenv("GOOGLE_API_KEY")
-gmaps = googlemaps.Client(key=GMAPS_API_KEY)
-geolocator = Nominatim(user_agent="covoiturage_app")
 
-# Fonction de geocodage
+class Participant(BaseModel):
+    name: str
+    address: str
 
-def geocode(address):
-    try:
-        result = gmaps.geocode(address)
-        if result:
-            loc = result[0]['geometry']['location']
-            return [loc['lng'], loc['lat']]
-    except Exception as e:
-        print(f"Erreur geocode Google : {e}")
-    return None
 
-# Reverse geocoding nettoyé
-def reverse_geocode(coords):
-    try:
-        loc = geolocator.reverse((coords[1], coords[0]), timeout=10)
-        if loc and loc.address:
-            address = loc.address
-            segments_to_remove = ["Loches", "Indre-et-Loire", "Centre-Val de Loire", "France métropolitaine", "France"]
-            for seg in segments_to_remove:
-                address = address.replace(seg, "")
-            return address.replace("  ", " ").strip(" ,→")
-    except Exception as e:
-        print(f"Reverse geocoding échoué : {e}")
-    return f"{coords[1]},{coords[0]}"
+class InputData(BaseModel):
+    participants: List[Participant]
+    destination: str
 
-# Durée de trajet Google Maps
-def get_route_duration(coords):
-    try:
-        origin = f"{coords[0][1]},{coords[0][0]}"
-        destination = f"{coords[-1][1]},{coords[-1][0]}"
-        waypoints = [f"{c[1]},{c[0]}" for c in coords[1:-1]]
-        result = gmaps.directions(origin=origin, destination=destination, waypoints=waypoints, mode="driving")
-        if result:
-            return result[0]['legs'][0]['duration']['value']
-    except Exception as e:
-        print(f"Erreur Google Directions : {e}")
-    return float('inf')
+
+def geocode_address(address: str):
+    location = geolocator.geocode(address)
+    if location:
+        return [location.longitude, location.latitude]
+    else:
+        raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
+
+
+def reverse_geocode(lat: float, lon: float) -> str:
+    location = geolocator.reverse((lat, lon), exactly_one=True, language="fr")
+    if location:
+        return location.address
+    else:
+        return f"{lat},{lon}"
+
+
+def create_google_maps_link(adresses: List[str]) -> str:
+    if len(adresses) < 2:
+        return ""
+    origin = urllib.parse.quote(adresses[0])
+    destination = urllib.parse.quote(adresses[-1])
+    waypoints = "|".join(urllib.parse.quote(adr) for adr in adresses[1:-1])
+    return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
+
 
 @app.post("/optimiser_direct")
-async def optimiser_direct(data: dict = Body(...)):
-    joueurs = data.get("players", [])
-    destination = data.get("destination", "").strip()
-    if not joueurs or not destination:
-        return {"trajets": []}
+async def optimiser_trajets(data: InputData):
+    participants = data.participants
+    destination = data.destination
 
-    DESTINATION_COORD = geocode(destination)
-    if not DESTINATION_COORD:
-        return {"error": "Échec du géocodage de la destination."}
+    # Géocoder les adresses
+    coords = []
+    for p in participants:
+        coords.append(geocode_address(p.address))
 
-    df = pd.DataFrame(joueurs)
-    df['coord'] = df['address'].apply(geocode)
-    df['rotation'] = df.get('rotation', 'moyen')
-    df = df[df['coord'].notnull()].reset_index(drop=True)
-    df['duree_directe'] = [get_route_duration([c, DESTINATION_COORD]) for c in df['coord']]
-    time.sleep(1)
+    coord_dest = geocode_address(destination)
 
-    def score_rotation(rotation):
-        return {"souvent": 0, "moyen": 1, "rare": 2}.get(rotation, 1)
+    # Calculer la durée de chaque participant seul
+    durees_solo = {}
+    for i, p in enumerate(participants):
+        try:
+            route = ors_client.directions(
+                coordinates=[coords[i], coord_dest],
+                profile="driving-car",
+                format="geojson"
+            )
+            durees_solo[p.name] = route["features"][0]["properties"]["summary"]["duration"]
+        except Exception:
+            durees_solo[p.name] = float("inf")
 
-    df = df.sort_values(by="rotation", key=lambda col: col.map(score_rotation)).reset_index(drop=True)
+    # Affecter chaque participant à une voiture (greedy)
+    trajets = []
+    voitures = []
+    seuil_rallonge = 1.3  # max 30% de détour
 
-    groupes = []
-    utilises = set()
+    for conducteur in participants:
+        voiture = {
+            "conducteur": conducteur.name,
+            "passagers": [],
+            "coords": [geocode_address(conducteur.address)],
+            "noms": [conducteur.name]
+        }
 
-    for _, row in df.iterrows():
-        if row['name'] in utilises:
-            continue
-        conducteur = row
-        groupe = [{"nom": conducteur['name'], "marche": False}]
-        coords_groupe = [conducteur['coord']]
-        utilises.add(conducteur['name'])
-        duree_base = conducteur['duree_directe']
+        for passager in participants:
+            if passager.name == conducteur.name:
+                continue
 
-        candidats = df[~df['name'].isin(utilises)].copy()
-        for _, passenger in candidats.iterrows():
-            trajet = [conducteur['coord'], passenger['coord'], DESTINATION_COORD]
-            duree_group = get_route_duration(trajet)
-            if duree_group <= duree_base * 1.3:
-                groupe.append({"nom": passenger['name'], "marche": False})
-                coords_groupe.append(passenger['coord'])
-                utilises.add(passenger['name'])
-            # else: # Option marche à pied temporairement désactivée
-            #     distance = haversine(passenger['coord'], conducteur['coord'])
-            #     if distance <= 200:
-            #         marche_url = get_walking_url(passenger['coord'], conducteur['coord'])
-            #         groupe.append({
-            #             "nom": passenger['name'],
-            #             "marche": True,
-            #             "rendez_vous": {
-            #                 "coord": conducteur['coord'],
-            #                 "adresse": reverse_geocode(conducteur['coord']),
-            #                 "marche_maps_url": marche_url
-            #             }
-            #         })
-            #         coords_groupe.append(conducteur['coord'])
-            #         utilises.add(passenger['name'])
+            coords_temp = voiture["coords"] + [geocode_address(passager.address), coord_dest]
+            try:
+                route = ors_client.directions(
+                    coordinates=coords_temp,
+                    profile="driving-car",
+                    format="geojson"
+                )
+                duree_avec_passager = route["features"][0]["properties"]["summary"]["duration"]
+                duree_solo = durees_solo[conducteur.name]
+                if duree_avec_passager <= seuil_rallonge * duree_solo:
+                    voiture["coords"].insert(-1, geocode_address(passager.address))
+                    voiture["noms"].append(passager.name)
+            except Exception:
+                continue
 
-            if len(groupe) >= 4:
-                break
-            time.sleep(1)
+        voitures.append(voiture)
 
-        groupes.append((groupe, coords_groupe))
+    # Nettoyer les doublons (un passager ne peut pas être dans 2 voitures)
+    deja_assignes = set()
+    trajets_final = []
 
-    result = []
-    for i, (groupe, coords) in enumerate(groupes, 1):
-        # → On récupère les adresses exactes à partir de df (plutôt que reverse_geocode)
-        noms_du_groupe = [membre['nom'] for membre in groupe]
-        adresses = df[df['name'].isin(noms_du_groupe)]['address'].tolist() + [destination]
+    for i, v in enumerate(voitures):
+        passagers_uniques = []
+        for nom in v["noms"][1:]:
+            if nom not in deja_assignes:
+                passagers_uniques.append(nom)
+                deja_assignes.add(nom)
+        if v["conducteur"] not in deja_assignes:
+            deja_assignes.add(v["conducteur"])
+            passagers_uniques.insert(0, v["conducteur"])
+        coords_trajet = [geocode_address(p.address) for p in participants if p.name in passagers_uniques]
+        coords_trajet.append(coord_dest)
 
-        # Nettoyage des adresses (enlève virgules multiples, espaces inutiles)
-        adresses = [", ".join(filter(None, map(str.strip, adresse.split(',')))) for adresse in adresses]
+        # Récupérer les adresses lisibles
+        adresses_lisibles = []
+        for lon, lat in coords_trajet:
+            adresse = reverse_geocode(lat, lon)
+            propre = ", ".join([x.strip() for x in adresse.split(',') if x.strip()])
+            adresses_lisibles.append(propre)
 
-        origin = quote(adresses[0])
-        destination_enc = quote(adresses[-1])
-        waypoints = "|".join([quote(a) for a in adresses[1:-1]])
-        gmaps_url = f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination_enc}&waypoints={waypoints}"
+        trajet = {
+            "voiture": f"Voiture {len(trajets_final)+1}",
+            "conducteur": v["conducteur"],
+            "passagers": [{"nom": nom, "marche": False} for nom in passagers_uniques if nom != v["conducteur"]],
+            "ordre": " → ".join(adresses_lisibles),
+            "google_maps": create_google_maps_link(adresses_lisibles)
+        }
+        trajets_final.append(trajet)
 
-        result.append({
-            "voiture": f"Voiture {i}",
-            "conducteur": groupe[0]['nom'],
-            "passagers": groupe[1:],
-            "ordre": " → ".join(adresses),
-            "google_maps": gmaps_url
-        })
-
-    return {"trajets": result}
-
+    return {"trajets": trajets_final}
