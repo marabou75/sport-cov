@@ -1,17 +1,16 @@
-
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 import openrouteservice
 from openrouteservice import convert
-from geopy.geocoders import Nominatim
 import urllib.parse
+import requests
 
 app = FastAPI()
 
 ORS_API_KEY = "your_openrouteservice_api_key"  # Remplacer par votre clé OpenRouteService
+GOOGLE_API_KEY = "your_google_api_key"  # Remplacer par votre clé Google Maps
 ors_client = openrouteservice.Client(key=ORS_API_KEY)
-geolocator = Nominatim(user_agent="carpooling_app")
 
 
 class Participant(BaseModel):
@@ -26,21 +25,33 @@ class InputData(BaseModel):
 
 def geocode_address(address: str):
     try:
-        location = geolocator.geocode(address, timeout=10)  # ⏱ timeout augmenté à 10 sec
-        if location:
-            return [location.longitude, location.latitude]
+        url = f"https://maps.googleapis.com/maps/api/geocode/json"
+        params = {"address": address, "key": GOOGLE_API_KEY}
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        if data["status"] == "OK":
+            loc = data["results"][0]["geometry"]["location"]
+            return [loc["lng"], loc["lat"]]
         else:
             raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
     except Exception as e:
-        print(f"[ERREUR] géocodage '{address}': {e}")  # ✅ Log dans les logs Render
+        print(f"[ERREUR] géocodage '{address}': {e}")
         raise HTTPException(status_code=500, detail=f"Erreur lors du géocodage de l'adresse '{address}' : {e}")
 
 
 def reverse_geocode(lat: float, lon: float) -> str:
-    location = geolocator.reverse((lat, lon), exactly_one=True, language="fr")
-    if location:
-        return location.address
-    else:
+    try:
+        url = f"https://maps.googleapis.com/maps/api/geocode/json"
+        params = {"latlng": f"{lat},{lon}", "key": GOOGLE_API_KEY, "language": "fr"}
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        if data["status"] == "OK":
+            return data["results"][0]["formatted_address"]
+        else:
+            return f"{lat},{lon}"
+    except:
         return f"{lat},{lon}"
 
 
@@ -145,3 +156,4 @@ async def optimiser_trajets(data: InputData):
         trajets_final.append(trajet)
 
     return {"trajets": trajets_final}
+
