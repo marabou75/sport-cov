@@ -25,11 +25,15 @@ class InputData(BaseModel):
 
 
 def geocode_address(address: str):
-    location = geolocator.geocode(address)
-    if location:
-        return [location.longitude, location.latitude]
-    else:
-        raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
+    try:
+        location = geolocator.geocode(address, timeout=10)  # ⏱ timeout augmenté à 10 sec
+        if location:
+            return [location.longitude, location.latitude]
+        else:
+            raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
+    except Exception as e:
+        print(f"[ERREUR] géocodage '{address}': {e}")  # ✅ Log dans les logs Render
+        raise HTTPException(status_code=500, detail=f"Erreur lors du géocodage de l'adresse '{address}' : {e}")
 
 
 def reverse_geocode(lat: float, lon: float) -> str:
