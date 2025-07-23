@@ -5,11 +5,16 @@ import openrouteservice
 from openrouteservice import convert
 import urllib.parse
 import requests
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  # Charge les variables depuis .env
+
+ORS_API_KEY = os.getenv("ORS_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app = FastAPI()
 
-ORS_API_KEY = "your_openrouteservice_api_key"  # Remplacer par votre clé OpenRouteService
-GOOGLE_API_KEY = "your_google_api_key"  # Remplacer par votre clé Google Maps
 ors_client = openrouteservice.Client(key=ORS_API_KEY)
 
 
