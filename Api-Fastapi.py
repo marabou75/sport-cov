@@ -1,163 +1,18 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List, Dict
-import openrouteservice
-import urllib.parse
-import requests
-from dotenv import load_dotenv
-import os
-import time
-
-load_dotenv()  # Charge les variables depuis .env
-
-ORS_API_KEY = os.getenv("ORS_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-app = FastAPI()
-ors_client = openrouteservice.Client(key=ORS_API_KEY)
-
-
-class Participant(BaseModel):
-    name: str
-    address: str
-
-
-class InputData(BaseModel):
-    participants: List[Participant]
-    destination: str
-
-
-# Cache pour éviter les géocodages et appels redondants
-coord_cache: Dict[str, List[float]] = {}
-
-
-def geocode_address(address: str):
-    if address in coord_cache:
-        return coord_cache[address]
-    try:
-        url = f"https://maps.googleapis.com/maps/api/geocode/json"
-        params = {"address": address, "key": GOOGLE_API_KEY}
-        response = requests.get(url, params=params, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        if data["status"] == "OK":
-            loc = data["results"][0]["geometry"]["location"]
-            coords = [loc["lng"], loc["lat"]]
-            coord_cache[address] = coords
-            return coords
-        else:
-            raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur lors du géocodage de l'adresse '{address}' : {e}")
-
-
-def reverse_geocode(lat: float, lon: float) -> str:
-    try:
-        url = f"https://maps.googleapis.com/maps/api/geocode/json"
-        params = {"latlng": f"{lat},{lon}", "key": GOOGLE_API_KEY, "language": "fr"}
-        response = requests.get(url, params=params, timeout=5)
-        response.raise_for_status()
-        data = response.json()
-        if data["status"] == "OK":
-            return data["results"][0]["formatted_address"]
-        else:
-            return f"{lat},{lon}"
-    except:
-        return f"{lat},{lon}"
-
-
-def create_google_maps_link(adresses: List[str]) -> str:
-    if len(adresses) < 2:
-        return ""
-    origin = urllib.parse.quote(adresses[0])
-    destination = urllib.parse.quote(adresses[-1])
-    waypoints = "|".join(urllib.parse.quote(adr) for adr in adresses[1:-1])
-    return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
-
-
-@app.post("/optimiser_direct")
-async def optimiser_trajets(data: InputData):
-    participants = data.participants
-    destination = data.destination
-
-    coords = [geocode_address(p.address) for p in participants]
-    coord_dest = geocode_address(destination)
-
-    durees_solo = {}
-    for i, p in enumerate(participants):
-        try:
-            time.sleep(1)
-            route = ors_client.directions(
-                coordinates=[coords[i], coord_dest],
-                profile="driving-car",
-                format="geojson"
-            )
-            durees_solo[p.name] = route["features"][0]["properties"]["summary"]["duration"]
-        except Exception:
-            durees_solo[p.name] = float("inf")
-
-    trajets = []
-    voitures = []
-    seuil_rallonge = 1.3
-
-    for conducteur in participants:
-        voiture = {
-            "conducteur": conducteur.name,
-            "passagers": [],
-            "coords": [geocode_address(conducteur.address)],
-            "noms": [conducteur.name]
-        }
-
-        for passager in participants:
-            if passager.name == conducteur.name:
-                continue
-            coords_temp = voiture["coords"] + [geocode_address(passager.address), coord_dest]
-            try:
-                time.sleep(1)
-                route = ors_client.directions(
-                    coordinates=coords_temp,
-                    profile="driving-car",
-                    format="geojson"
-                )
-                duree_avec_passager = route["features"][0]["properties"]["summary"]["duration"]
-                duree_solo = durees_solo[conducteur.name]
-                if duree_avec_passager <= seuil_rallonge * duree_solo:
-                    voiture["coords"].insert(-1, geocode_address(passager.address))
-                    voiture["noms"].append(passager.name)
-            except Exception:
-                continue
-
-        voitures.append(voiture)
-
-    deja_assignes = set()
-    trajets_final = []
-
-    for v in voitures:
-        passagers_uniques = []
-        for nom in v["noms"][1:]:
-            if nom not in deja_assignes:
-                passagers_uniques.append(nom)
-                deja_assignes.add(nom)
-        if v["conducteur"] not in deja_assignes:
-            deja_assignes.add(v["conducteur"])
-            passagers_uniques.insert(0, v["conducteur"])
-        coords_trajet = [geocode_address(p.address) for p in participants if p.name in passagers_uniques]
-        coords_trajet.append(coord_dest)
-
-        adresses_lisibles = []
-        for lon, lat in coords_trajet:
-            adresse = reverse_geocode(lat, lon)
-            propre = ", ".join([x.strip() for x in adresse.split(',') if x.strip()])
-            adresses_lisibles.append(propre)
-
-        trajet = {
-            "voiture": f"Voiture {len(trajets_final)+1}",
-            "conducteur": v["conducteur"],
-            "passagers": [{"nom": nom, "marche": False} for nom in passagers_uniques if nom != v["conducteur"]],
-            "ordre": " → ".join(adresses_lisibles),
-            "google_maps": create_google_maps_link(adresses_lisibles)
-        }
-        trajets_final.append(trajet)
-
-    return {"trajets": trajets_final}
-
+INFO:     35.197.80.206:0 - "GET / HTTP/1.1" 404 Not Found
+/opt/render/project/src/.venv/lib/python3.11/site-packages/openrouteservice/client.py:211: UserWarning: Rate limit exceeded. Retrying for the 1st time.
+  warnings.warn('Rate limit exceeded. Retrying for the {0}{1} time.'.format(retry_counter + 1,
+/opt/render/project/src/.venv/lib/python3.11/site-packages/openrouteservice/client.py:211: UserWarning: Rate limit exceeded. Retrying for the 2nd time.
+  warnings.warn('Rate limit exceeded. Retrying for the {0}{1} time.'.format(retry_counter + 1,
+/opt/render/project/src/.venv/lib/python3.11/site-packages/openrouteservice/client.py:211: UserWarning: Rate limit exceeded. Retrying for the 3rd time.
+  warnings.warn('Rate limit exceeded. Retrying for the {0}{1} time.'.format(retry_counter + 1,
+/opt/render/project/src/.venv/lib/python3.11/site-packages/openrouteservice/client.py:211: UserWarning: Rate limit exceeded. Retrying for the 4th time.
+  warnings.warn('Rate limit exceeded. Retrying for the {0}{1} time.'.format(retry_counter + 1,
+/opt/render/project/src/.venv/lib/python3.11/site-packages/openrouteservice/client.py:211: UserWarning: Rate limit exceeded. Retrying for the 5th time.
+  warnings.warn('Rate limit exceeded. Retrying for the {0}{1} time.'.format(retry_counter + 1,
+==> Detected service running on port 10000
+==> Docs on specifying a port: https://render.com/docs/web-services#port-binding
+INFO:     169.155.255.137:0 - "POST /optimiser_direct HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [103]
