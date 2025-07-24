@@ -1,12 +1,12 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict
 import openrouteservice
-from openrouteservice import convert
 import urllib.parse
 import requests
 from dotenv import load_dotenv
 import os
+import time
 
 load_dotenv()  # Charge les variables depuis .env
 
@@ -14,7 +14,6 @@ ORS_API_KEY = os.getenv("ORS_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app = FastAPI()
-
 ors_client = openrouteservice.Client(key=ORS_API_KEY)
 
 
@@ -28,7 +27,13 @@ class InputData(BaseModel):
     destination: str
 
 
+# Cache pour éviter les géocodages et appels redondants
+coord_cache: Dict[str, List[float]] = {}
+
+
 def geocode_address(address: str):
+    if address in coord_cache:
+        return coord_cache[address]
     try:
         url = f"https://maps.googleapis.com/maps/api/geocode/json"
         params = {"address": address, "key": GOOGLE_API_KEY}
@@ -37,11 +42,12 @@ def geocode_address(address: str):
         data = response.json()
         if data["status"] == "OK":
             loc = data["results"][0]["geometry"]["location"]
-            return [loc["lng"], loc["lat"]]
+            coords = [loc["lng"], loc["lat"]]
+            coord_cache[address] = coords
+            return coords
         else:
             raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
     except Exception as e:
-        print(f"[ERREUR] géocodage '{address}': {e}")
         raise HTTPException(status_code=500, detail=f"Erreur lors du géocodage de l'adresse '{address}' : {e}")
 
 
@@ -74,17 +80,13 @@ async def optimiser_trajets(data: InputData):
     participants = data.participants
     destination = data.destination
 
-    # Géocoder les adresses
-    coords = []
-    for p in participants:
-        coords.append(geocode_address(p.address))
-
+    coords = [geocode_address(p.address) for p in participants]
     coord_dest = geocode_address(destination)
 
-    # Calculer la durée de chaque participant seul
     durees_solo = {}
     for i, p in enumerate(participants):
         try:
+            time.sleep(1)
             route = ors_client.directions(
                 coordinates=[coords[i], coord_dest],
                 profile="driving-car",
@@ -94,10 +96,9 @@ async def optimiser_trajets(data: InputData):
         except Exception:
             durees_solo[p.name] = float("inf")
 
-    # Affecter chaque participant à une voiture (greedy)
     trajets = []
     voitures = []
-    seuil_rallonge = 1.3  # max 30% de détour
+    seuil_rallonge = 1.3
 
     for conducteur in participants:
         voiture = {
@@ -110,9 +111,9 @@ async def optimiser_trajets(data: InputData):
         for passager in participants:
             if passager.name == conducteur.name:
                 continue
-
             coords_temp = voiture["coords"] + [geocode_address(passager.address), coord_dest]
             try:
+                time.sleep(1)
                 route = ors_client.directions(
                     coordinates=coords_temp,
                     profile="driving-car",
@@ -128,11 +129,10 @@ async def optimiser_trajets(data: InputData):
 
         voitures.append(voiture)
 
-    # Nettoyer les doublons (un passager ne peut pas être dans 2 voitures)
     deja_assignes = set()
     trajets_final = []
 
-    for i, v in enumerate(voitures):
+    for v in voitures:
         passagers_uniques = []
         for nom in v["noms"][1:]:
             if nom not in deja_assignes:
@@ -144,7 +144,6 @@ async def optimiser_trajets(data: InputData):
         coords_trajet = [geocode_address(p.address) for p in participants if p.name in passagers_uniques]
         coords_trajet.append(coord_dest)
 
-        # Récupérer les adresses lisibles
         adresses_lisibles = []
         for lon, lat in coords_trajet:
             adresse = reverse_geocode(lat, lon)
