@@ -8,21 +8,17 @@ from dotenv import load_dotenv
 from functools import lru_cache
 
 load_dotenv()
-
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app = FastAPI()
-
 
 class Participant(BaseModel):
     name: str
     address: str
 
-
 class InputData(BaseModel):
     participants: List[Participant]
     destination: str
-
 
 @lru_cache(maxsize=128)
 def geocode_address_cached(address: str):
@@ -37,13 +33,11 @@ def geocode_address_cached(address: str):
     else:
         raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
 
-
 def geocode_address(address: str):
     try:
         return list(geocode_address_cached(address))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur géocodage '{address}' : {e}")
-
 
 @lru_cache(maxsize=256)
 def get_google_duration(origin, destination):
@@ -61,7 +55,6 @@ def get_google_duration(origin, destination):
     else:
         raise Exception(f"Google Directions error: {data['status']}")
 
-
 def create_google_maps_link(adresses: List[str]) -> str:
     if len(adresses) < 2:
         return ""
@@ -69,7 +62,6 @@ def create_google_maps_link(adresses: List[str]) -> str:
     destination = urllib.parse.quote(adresses[-1])
     waypoints = "|".join(urllib.parse.quote(adr) for adr in adresses[1:-1])
     return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
-
 
 @app.post("/optimiser_direct")
 async def optimiser_trajets(data: InputData):
@@ -79,10 +71,9 @@ async def optimiser_trajets(data: InputData):
     coords_participants = {p.name: geocode_address(p.address) for p in participants}
     coord_dest = geocode_address(destination)
 
-    # Durée solo
     durees_solo = {}
     for p in participants:
-        durees_solo[p.name] = get_google_duration(coords_participants[p.name], coord_dest)
+        durees_solo[p.name] = get_google_duration(tuple(coords_participants[p.name]), tuple(coord_dest))
 
     seuil_rallonge = 1.3
     voitures = []
@@ -99,8 +90,8 @@ async def optimiser_trajets(data: InputData):
             if passager.name == conducteur.name:
                 continue
             coords_temp = voiture["coords"] + [coords_participants[passager.name], coord_dest]
-            duree_avec_passager = get_google_duration(coords_temp[0], coords_temp[1])
-            duree_avec_passager += get_google_duration(coords_temp[1], coords_temp[2])
+            duree_avec_passager = get_google_duration(tuple(coords_temp[0]), tuple(coords_temp[1]))
+            duree_avec_passager += get_google_duration(tuple(coords_temp[1]), tuple(coords_temp[2]))
 
             if duree_avec_passager <= seuil_rallonge * durees_solo[conducteur.name]:
                 voiture["coords"].insert(-1, coords_participants[passager.name])
