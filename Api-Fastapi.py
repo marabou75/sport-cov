@@ -76,7 +76,7 @@ async def optimiser_trajets(data: InputData):
         p.name: get_google_duration(coords[p.name], coord_dest) for p in participants
     }
 
-    seuil_rallonge = 1.5
+    seuil_rallonge = 1.7
     non_assignes = set(p.name for p in participants)
     trajets = []
 
