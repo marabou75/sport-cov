@@ -85,64 +85,64 @@ async def optimiser_trajets(data: InputData):
     non_assignes = set(p.name for p in participants)
     trajets = []
 
-    while non_assignes:
-        meilleurs_trajet = None
-        duree_min = float('inf')
+while non_assignes:
+    meilleur_scenario = None
+    duree_min = float('inf')
 
-        for conducteur in non_assignes:
-            try:
-                passagers = []
+    for conducteur_candidat in non_assignes:
+        try:
+            passagers_compatibles = []
+            for autre in non_assignes:
+                if autre == conducteur_candidat:
+                    continue
+                duree_aller = get_google_duration(coords[conducteur_candidat], coords[autre])
+                duree_retour = get_google_duration(coords[autre], coord_dest)
+                duree_total = duree_aller + duree_retour
+                if duree_total <= seuil_rallonge * durees_directes[conducteur_candidat]:
+                    passagers_compatibles.append(autre)
 
-                for passager in non_assignes:
-                    if passager == conducteur:
-                        continue
-                    duree_aller = get_google_duration(coords[conducteur], coords[passager])
-                    duree_retour = get_google_duration(coords[passager], coord_dest)
-                    duree_total = duree_aller + duree_retour
-
-                    if duree_total <= seuil_rallonge * durees_directes[conducteur]:
-                        passagers.append(passager)
-
+            # Tester chaque passager compatible comme conducteur potentiel
+            groupe = [conducteur_candidat] + passagers_compatibles
+            for conducteur in groupe:
+                passagers = [p for p in groupe if p != conducteur]
                 points = [coords[conducteur]] + [coords[p] for p in passagers] + [coord_dest]
-                duree_trajet = 0
-                for i in range(len(points) - 1):
-                    duree_trajet += get_google_duration(points[i], points[i + 1])
+                duree_trajet = sum(get_google_duration(points[i], points[i+1]) for i in range(len(points)-1))
 
                 if duree_trajet < duree_min:
                     duree_min = duree_trajet
-                    meilleurs_trajet = {
+                    meilleur_scenario = {
                         "conducteur": conducteur,
-                        "passagers": passagers,
+                        "passagers": passagers
                     }
 
-            except Exception as e:
-                print(f"Erreur lors du test de {conducteur} : {e}")
+        except Exception as e:
+            print(f"Erreur lors du test de {conducteur_candidat} : {e}")
 
-        if not meilleurs_trajet:
-            seul = non_assignes.pop()
-            adresse = next(p.address for p in participants if p.name == seul)
-            trajets.append({
-                "voiture": f"Voiture {len(trajets)+1}",
-                "conducteur": seul,
-                "passagers": [],
-                "ordre": f"{adresse} → {destination}",
-                "google_maps": create_google_maps_link([adresse, destination])
-            })
-        else:
-            conducteur = meilleurs_trajet["conducteur"]
-            passagers = meilleurs_trajet["passagers"]
-            noms = [conducteur] + passagers
-            adresses = [p.address for p in participants if p.name in noms] + [destination]
+    if not meilleur_scenario:
+        seul = non_assignes.pop()
+        adresse = next(p.address for p in participants if p.name == seul)
+        trajets.append({
+            "voiture": f"Voiture {len(trajets)+1}",
+            "conducteur": seul,
+            "passagers": [],
+            "ordre": f"{adresse} → {destination}",
+            "google_maps": create_google_maps_link([adresse, destination])
+        })
+    else:
+        conducteur = meilleur_scenario["conducteur"]
+        passagers = meilleur_scenario["passagers"]
+        noms = [conducteur] + passagers
+        adresses = [p.address for p in participants if p.name in noms] + [destination]
 
-            trajets.append({
-                "voiture": f"Voiture {len(trajets)+1}",
-                "conducteur": conducteur,
-                "passagers": [{"nom": p, "marche": False} for p in passagers],
-                "ordre": " → ".join(adresses),
-                "google_maps": create_google_maps_link(adresses)
-            })
+        trajets.append({
+            "voiture": f"Voiture {len(trajets)+1}",
+            "conducteur": conducteur,
+            "passagers": [{"nom": p, "marche": False} for p in passagers],
+            "ordre": " → ".join(adresses),
+            "google_maps": create_google_maps_link(adresses)
+        })
 
-            non_assignes -= set(noms)
+        non_assignes -= set(noms)
 
     return {"trajets": trajets}
 
