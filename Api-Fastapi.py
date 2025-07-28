@@ -75,7 +75,7 @@ async def optimiser_trajets(data: InputData):
     for p in participants:
         durees_solo[p.name] = get_google_duration(tuple(coords_participants[p.name]), tuple(coord_dest))
 
-    seuil_rallonge = 1.3
+    seuil_rallonge = 1.5
     voitures = []
 
     for conducteur in participants:
