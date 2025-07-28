@@ -35,7 +35,7 @@ def geocode_address_cached(address: str):
 
 def geocode_address(address: str):
     try:
-        return list(geocode_address_cached(address))
+        return tuple(geocode_address_cached(address))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur geocodage '{address}' : {e}")
 
