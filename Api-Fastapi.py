@@ -107,6 +107,10 @@ while non_assignes:
                 passagers = [p for p in groupe if p != conducteur]
                 points = [coords[conducteur]] + [coords[p] for p in passagers] + [coord_dest]
                 duree_trajet = sum(get_google_duration(points[i], points[i+1]) for i in range(len(points)-1))
+                
+                print(f"[DEBUG] Conducteur testé : {conducteur}")
+                print(f"[DEBUG] Passagers évalués : {passagers}")
+                print(f"[DEBUG] Durée totale du trajet : {duree_trajet/60:.1f} min")
 
                 if duree_trajet < duree_min:
                     duree_min = duree_trajet
@@ -114,6 +118,7 @@ while non_assignes:
                         "conducteur": conducteur,
                         "passagers": passagers
                     }
+
 
         except Exception as e:
             print(f"Erreur lors du test de {conducteur_candidat} : {e}")
