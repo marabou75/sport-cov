@@ -71,14 +71,19 @@ async def optimiser_trajets(data: InputData):
     coords_participants = {p.name: geocode_address(p.address) for p in participants}
     coord_dest = geocode_address(destination)
 
-    durees_solo = {}
-    for p in participants:
-        durees_solo[p.name] = get_google_duration(tuple(coords_participants[p.name]), tuple(coord_dest))
+    durees_solo = {
+        p.name: get_google_duration(tuple(coords_participants[p.name]), tuple(coord_dest))
+        for p in participants
+    }
 
     seuil_rallonge = 1.3
-    voitures = []
+    deja_assignes = set()
+    trajets_final = []
 
     for conducteur in participants:
+        if conducteur.name in deja_assignes:
+            continue  # ✅ Conducteur déjà utilisé comme passager
+
         voiture = {
             "conducteur": conducteur.name,
             "passagers": [],
@@ -87,38 +92,29 @@ async def optimiser_trajets(data: InputData):
         }
 
         for passager in participants:
-            if passager.name == conducteur.name:
-                continue
+            if passager.name == conducteur.name or passager.name in deja_assignes:
+                continue  # ✅ Évite les doublons
+
             coords_temp = voiture["coords"] + [coords_participants[passager.name], coord_dest]
-            duree_avec_passager = get_google_duration(tuple(coords_temp[0]), tuple(coords_temp[1]))
-            duree_avec_passager += get_google_duration(tuple(coords_temp[1]), tuple(coords_temp[2]))
+            duree_avec_passager = (
+                get_google_duration(tuple(coords_temp[0]), tuple(coords_temp[1])) +
+                get_google_duration(tuple(coords_temp[1]), tuple(coords_temp[2]))
+            )
 
             if duree_avec_passager <= seuil_rallonge * durees_solo[conducteur.name]:
                 voiture["coords"].insert(-1, coords_participants[passager.name])
                 voiture["noms"].append(passager.name)
+                deja_assignes.add(passager.name)
 
-        voitures.append(voiture)
+        deja_assignes.add(conducteur.name)
 
-    deja_assignes = set()
-    trajets_final = []
-
-    for v in voitures:
-        passagers_uniques = []
-        for nom in v["noms"][1:]:
-            if nom not in deja_assignes:
-                passagers_uniques.append(nom)
-                deja_assignes.add(nom)
-        if v["conducteur"] not in deja_assignes:
-            deja_assignes.add(v["conducteur"])
-            passagers_uniques.insert(0, v["conducteur"])
-
-        adresses_lisibles = [p.address for p in participants if p.name in passagers_uniques]
+        adresses_lisibles = [p.address for p in participants if p.name in voiture["noms"]]
         adresses_lisibles.append(destination)
 
         trajets_final.append({
             "voiture": f"Voiture {len(trajets_final)+1}",
-            "conducteur": v["conducteur"],
-            "passagers": [{"nom": n, "marche": False} for n in passagers_uniques if n != v["conducteur"]],
+            "conducteur": voiture["conducteur"],
+            "passagers": [{"nom": n, "marche": False} for n in voiture["noms"] if n != voiture["conducteur"]],
             "ordre": " → ".join(adresses_lisibles),
             "google_maps": create_google_maps_link(adresses_lisibles)
         })
