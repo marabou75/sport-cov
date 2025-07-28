@@ -1,7 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
-import openrouteservice
 import urllib.parse
 import requests
 import os
@@ -10,32 +9,34 @@ from functools import lru_cache
 
 load_dotenv()
 
-ORS_API_KEY = os.getenv("ORS_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app = FastAPI()
-ors_client = openrouteservice.Client(key=ORS_API_KEY)
+
 
 class Participant(BaseModel):
     name: str
     address: str
 
+
 class InputData(BaseModel):
     participants: List[Participant]
     destination: str
 
+
 @lru_cache(maxsize=128)
 def geocode_address_cached(address: str):
-    url = f"https://maps.googleapis.com/maps/api/geocode/json"
+    url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"address": address, "key": GOOGLE_API_KEY}
     response = requests.get(url, params=params, timeout=5)
     response.raise_for_status()
     data = response.json()
     if data["status"] == "OK":
         loc = data["results"][0]["geometry"]["location"]
-        return (loc["lng"], loc["lat"])  # Note : tuple pour lru_cache
+        return (loc["lng"], loc["lat"])
     else:
         raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
+
 
 def geocode_address(address: str):
     try:
@@ -43,17 +44,23 @@ def geocode_address(address: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur géocodage '{address}' : {e}")
 
+
 @lru_cache(maxsize=256)
-def cached_directions(origin: tuple, destination: tuple):
-    try:
-        route = ors_client.directions(
-            coordinates=[list(origin), list(destination)],
-            profile="driving-car",
-            format="geojson"
-        )
-        return route
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erreur ORS : {e}")
+def get_google_duration(origin, destination):
+    url = "https://maps.googleapis.com/maps/api/directions/json"
+    params = {
+        "origin": f"{origin[1]},{origin[0]}",
+        "destination": f"{destination[1]},{destination[0]}",
+        "key": GOOGLE_API_KEY
+    }
+    response = requests.get(url, params=params)
+    response.raise_for_status()
+    data = response.json()
+    if data["status"] == "OK":
+        return data["routes"][0]["legs"][0]["duration"]["value"]
+    else:
+        raise Exception(f"Google Directions error: {data['status']}")
+
 
 def create_google_maps_link(adresses: List[str]) -> str:
     if len(adresses) < 2:
@@ -63,6 +70,7 @@ def create_google_maps_link(adresses: List[str]) -> str:
     waypoints = "|".join(urllib.parse.quote(adr) for adr in adresses[1:-1])
     return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
 
+
 @app.post("/optimiser_direct")
 async def optimiser_trajets(data: InputData):
     participants = data.participants
@@ -71,14 +79,12 @@ async def optimiser_trajets(data: InputData):
     coords_participants = {p.name: geocode_address(p.address) for p in participants}
     coord_dest = geocode_address(destination)
 
-    # Durée solo pour chaque conducteur
+    # Durée solo
     durees_solo = {}
     for p in participants:
-        route = cached_directions(tuple(coords_participants[p.name]), tuple(coord_dest))
-        durees_solo[p.name] = route["features"][0]["properties"]["summary"]["duration"]
+        durees_solo[p.name] = get_google_duration(coords_participants[p.name], coord_dest)
 
     seuil_rallonge = 1.3
-    trajets = []
     voitures = []
 
     for conducteur in participants:
@@ -92,9 +98,10 @@ async def optimiser_trajets(data: InputData):
         for passager in participants:
             if passager.name == conducteur.name:
                 continue
-            trajet_temp = voiture["coords"] + [coords_participants[passager.name], coord_dest]
-            route = ors_client.directions(coordinates=trajet_temp, profile="driving-car", format="geojson")
-            duree_avec_passager = route["features"][0]["properties"]["summary"]["duration"]
+            coords_temp = voiture["coords"] + [coords_participants[passager.name], coord_dest]
+            duree_avec_passager = get_google_duration(coords_temp[0], coords_temp[1])
+            duree_avec_passager += get_google_duration(coords_temp[1], coords_temp[2])
+
             if duree_avec_passager <= seuil_rallonge * durees_solo[conducteur.name]:
                 voiture["coords"].insert(-1, coords_participants[passager.name])
                 voiture["noms"].append(passager.name)
