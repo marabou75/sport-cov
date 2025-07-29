@@ -15,6 +15,8 @@ app = FastAPI()
 class Participant(BaseModel):
     name: str
     address: str
+    email: str = ""
+    telephone: str = ""
 
 class InputData(BaseModel):
     participants: List[Participant]
@@ -66,6 +68,7 @@ def create_google_maps_link(adresses: List[str]) -> str:
 @app.post("/optimiser_direct")
 async def optimiser_trajets(data: InputData):
     participants = data.participants
+    infos_participants = {p.name: {"email": p.email, "telephone": p.telephone} for p in participants}
     destination = data.destination
 
     try:
@@ -142,10 +145,21 @@ while non_assignes:
         trajets.append({
             "voiture": f"Voiture {len(trajets)+1}",
             "conducteur": conducteur,
-            "passagers": [{"nom": p, "marche": False} for p in passagers],
+            "email_conducteur": infos_participants[conducteur]["email"],
+            "telephone_conducteur": infos_participants[conducteur]["telephone"],
+            "passagers": [
+                {
+                    "nom": p,
+                    "marche": False,
+                    "email": infos_participants[p]["email"],
+                    "telephone": infos_participants[p]["telephone"]
+                }
+                for p in passagers
+            ],
             "ordre": " → ".join(adresses),
             "google_maps": create_google_maps_link(adresses)
         })
+
 
         non_assignes -= set(noms)
 
