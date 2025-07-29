@@ -103,29 +103,27 @@ async def optimiser_trajets(data: InputData):
                     duree_total = duree_aller + duree_retour
                     if duree_total <= seuil_rallonge * durees_directes[conducteur_candidat]:
                         passagers_compatibles.append(autre)
-    
-                # Tester chaque passager compatible comme conducteur potentiel
+
                 groupe = [conducteur_candidat] + passagers_compatibles
                 for conducteur in groupe:
                     passagers = [p for p in groupe if p != conducteur]
                     points = [coords[conducteur]] + [coords[p] for p in passagers] + [coord_dest]
                     duree_trajet = sum(get_google_duration(points[i], points[i+1]) for i in range(len(points)-1))
-                    
+
                     print(f"[DEBUG] Conducteur testé : {conducteur}")
                     print(f"[DEBUG] Passagers évalués : {passagers}")
                     print(f"[DEBUG] Durée totale du trajet : {duree_trajet/60:.1f} min")
-    
+
                     if duree_trajet < duree_min:
                         duree_min = duree_trajet
                         meilleur_scenario = {
                             "conducteur": conducteur,
                             "passagers": passagers
                         }
-    
-    
+
             except Exception as e:
                 print(f"Erreur lors du test de {conducteur_candidat} : {e}")
-    
+
         if not meilleur_scenario:
             seul = non_assignes.pop()
             adresse = next(p.address for p in participants if p.name == seul)
@@ -141,7 +139,7 @@ async def optimiser_trajets(data: InputData):
             passagers = meilleur_scenario["passagers"]
             noms = [conducteur] + passagers
             adresses = [p.address for p in participants if p.name in noms] + [destination]
-    
+
             trajets.append({
                 "voiture": f"Voiture {len(trajets)+1}",
                 "conducteur": conducteur,
@@ -159,9 +157,8 @@ async def optimiser_trajets(data: InputData):
                 "ordre": " → ".join(adresses),
                 "google_maps": create_google_maps_link(adresses)
             })
-    
-    
+
             non_assignes -= set(noms)
-    
-        return {"trajets": trajets}
-            
+
+    return {"trajets": trajets}
+
