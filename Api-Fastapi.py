@@ -1,3 +1,4 @@
+from typing import Tuple
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
@@ -12,6 +13,12 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 app = FastAPI()
 
+@app.on_event("startup")
+def check_api_key():
+    if not GOOGLE_API_KEY:
+        # Arrête l'app proprement avec un message clair
+        raise RuntimeError("GOOGLE_API_KEY manquante (variable d'environnement).")
+
 class Participant(BaseModel):
     name: str
     address: str
@@ -23,21 +30,42 @@ class InputData(BaseModel):
     destination: str
 
 @lru_cache(maxsize=128)
-def geocode_address_cached(address: str):
+def geocode_address_cached(address: str) -> Tuple[float, float]:
+    # Vérifie la clé API avant tout appel
+    if not GOOGLE_API_KEY:
+        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY manquante.")
+
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"address": address, "key": GOOGLE_API_KEY}
-    response = requests.get(url, params=params, timeout=5)
-    response.raise_for_status()
-    data = response.json()
-    if data["status"] == "OK":
-        loc = data["results"][0]["geometry"]["location"]
-        return (loc["lng"], loc["lat"])
-    else:
-        raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
 
-def geocode_address(address: str):
     try:
-        return tuple(geocode_address_cached(address))
+        # timeout ajouté (augmente si besoin)
+        resp = requests.get(url, params=params, timeout=8)
+        resp.raise_for_status()
+    except requests.Timeout:
+        raise HTTPException(status_code=504, detail=f"Timeout géocodage pour '{address}'")
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Échec appel Google Geocode: {e}")
+
+    data = resp.json()
+    status = data.get("status", "UNKNOWN")
+
+    if status == "OK" and data.get("results"):
+        loc = data["results"][0]["geometry"]["location"]
+        return (loc["lng"], loc["lat"])  # (lng, lat)
+    elif status == "ZERO_RESULTS":
+        raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
+    else:
+        raise HTTPException(status_code=502, detail=f"Geocode error: {status}")
+
+def geocode_address(address: str) -> Tuple[float, float]:
+    """Wrapper qui gère les erreurs et normalise l'adresse."""
+    try:
+        lng, lat = geocode_address_cached(address.strip())
+        return (lng, lat)
+    except HTTPException:
+        # on propage tel quel pour que FastAPI retourne le bon status
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur geocodage '{address}' : {e}")
 
@@ -49,7 +77,7 @@ def get_google_duration(origin, destination):
         "destination": f"{destination[1]},{destination[0]}",
         "key": GOOGLE_API_KEY
     }
-    response = requests.get(url, params=params)
+    response = requests.get(url, params=params, timeout=8)
     response.raise_for_status()
     data = response.json()
     if data["status"] == "OK":
