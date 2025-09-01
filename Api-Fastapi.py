@@ -1,7 +1,6 @@
-from typing import Tuple
+from typing import Tuple, List
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List
 import urllib.parse
 import requests
 import os
@@ -11,12 +10,15 @@ from functools import lru_cache
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+# === CO2: facteur moyen en kg/km (modifiable via env) ===
+# ex: ADEME ~0.192 kg/km ; on garde 0.2 par défaut comme demandé
+CO2_PER_KM = float(os.getenv("CO2_PER_KM", "0.2"))
+
 app = FastAPI()
 
 @app.on_event("startup")
 def check_api_key():
     if not GOOGLE_API_KEY:
-        # Arrête l'app proprement avec un message clair
         raise RuntimeError("GOOGLE_API_KEY manquante (variable d'environnement).")
 
 class Participant(BaseModel):
@@ -31,7 +33,6 @@ class InputData(BaseModel):
 
 @lru_cache(maxsize=128)
 def geocode_address_cached(address: str) -> Tuple[float, float]:
-    # Vérifie la clé API avant tout appel
     if not GOOGLE_API_KEY:
         raise HTTPException(status_code=500, detail="GOOGLE_API_KEY manquante.")
 
@@ -39,7 +40,6 @@ def geocode_address_cached(address: str) -> Tuple[float, float]:
     params = {"address": address, "key": GOOGLE_API_KEY}
 
     try:
-        # timeout ajouté (augmente si besoin)
         resp = requests.get(url, params=params, timeout=8)
         resp.raise_for_status()
     except requests.Timeout:
@@ -64,13 +64,13 @@ def geocode_address(address: str) -> Tuple[float, float]:
         lng, lat = geocode_address_cached(address.strip())
         return (lng, lat)
     except HTTPException:
-        # on propage tel quel pour que FastAPI retourne le bon status
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur geocodage '{address}' : {e}")
 
 @lru_cache(maxsize=256)
-def get_google_duration(origin, destination):
+def get_google_duration(origin: Tuple[float, float], destination: Tuple[float, float]) -> int:
+    """Retourne la durée (en secondes) entre 2 points (lng, lat)."""
     url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
         "origin": f"{origin[1]},{origin[0]}",
@@ -85,6 +85,25 @@ def get_google_duration(origin, destination):
     else:
         raise Exception(f"Google Directions error: {data['status']}")
 
+# === CO2: distance en km entre 2 points, via Google Directions ===
+@lru_cache(maxsize=256)
+def get_google_distance_km(origin: Tuple[float, float], destination: Tuple[float, float]) -> float:
+    """Retourne la distance (en km) entre 2 points (lng, lat)."""
+    url = "https://maps.googleapis.com/maps/api/directions/json"
+    params = {
+        "origin": f"{origin[1]},{origin[0]}",
+        "destination": f"{destination[1]},{destination[0]}",
+        "key": GOOGLE_API_KEY
+    }
+    response = requests.get(url, params=params, timeout=8)
+    response.raise_for_status()
+    data = response.json()
+    if data["status"] == "OK":
+        meters = data["routes"][0]["legs"][0]["distance"]["value"]
+        return meters / 1000.0
+    else:
+        raise Exception(f"Google Directions error: {data['status']}")
+
 def create_google_maps_link(adresses: List[str]) -> str:
     if len(adresses) < 2:
         return ""
@@ -96,7 +115,7 @@ def create_google_maps_link(adresses: List[str]) -> str:
 @app.post("/optimiser_direct")
 async def optimiser_trajets(data: InputData):
     participants = data.participants
-    infos_participants = {p.name: {"email": p.email, "telephone": p.telephone} for p in participants}
+    infos_participants = {p.name: {"email": p.email, "telephone": p.telephone, "address": p.address} for p in participants}
     destination = data.destination
 
     try:
@@ -120,7 +139,7 @@ async def optimiser_trajets(data: InputData):
         meilleur_scenario = None
         duree_min = float('inf')
 
-        for conducteur_candidat in non_assignes:
+        for conducteur_candidat in list(non_assignes):
             try:
                 passagers_compatibles = []
                 for autre in non_assignes:
@@ -138,26 +157,27 @@ async def optimiser_trajets(data: InputData):
                     points = [coords[conducteur]] + [coords[p] for p in passagers] + [coord_dest]
                     duree_trajet = sum(get_google_duration(points[i], points[i+1]) for i in range(len(points)-1))
 
-                    print(f"[DEBUG] Conducteur testé : {conducteur}")
-                    print(f"[DEBUG] Passagers évalués : {passagers}")
-                    print(f"[DEBUG] Durée totale du trajet : {duree_trajet/60:.1f} min")
+                    # Logs debug (facultatifs)
+                    # print(f"[DEBUG] Conducteur testé : {conducteur}")
+                    # print(f"[DEBUG] Passagers évalués : {passagers}")
+                    # print(f"[DEBUG] Durée totale du trajet : {duree_trajet/60:.1f} min")
 
                     if duree_trajet < duree_min:
                         duree_min = duree_trajet
-                        meilleur_scenario = {
-                            "conducteur": conducteur,
-                            "passagers": passagers
-                        }
+                        meilleur_scenario = {"conducteur": conducteur, "passagers": passagers}
 
             except Exception as e:
-                print(f"Erreur lors du test de {conducteur_candidat} : {e}")
+                # print(f"Erreur lors du test de {conducteur_candidat} : {e}")
+                continue
 
         if not meilleur_scenario:
             seul = non_assignes.pop()
-            adresse = next(p.address for p in participants if p.name == seul)
+            adresse = infos_participants[seul]["address"]
             trajets.append({
                 "voiture": f"Voiture {len(trajets)+1}",
                 "conducteur": seul,
+                "email_conducteur": infos_participants[seul]["email"],
+                "telephone_conducteur": infos_participants[seul]["telephone"],
                 "passagers": [],
                 "ordre": f"{adresse} → {destination}",
                 "google_maps": create_google_maps_link([adresse, destination])
@@ -166,7 +186,7 @@ async def optimiser_trajets(data: InputData):
             conducteur = meilleur_scenario["conducteur"]
             passagers = meilleur_scenario["passagers"]
             noms = [conducteur] + passagers
-            adresses = [p.address for p in participants if p.name in noms] + [destination]
+            adresses = [infos_participants[n]["address"] for n in noms] + [destination]
 
             trajets.append({
                 "voiture": f"Voiture {len(trajets)+1}",
@@ -188,5 +208,22 @@ async def optimiser_trajets(data: InputData):
 
             non_assignes -= set(noms)
 
-    return {"trajets": trajets}
+    # === CO2: calcul de l'économie pour les PASSAGERS uniquement (aller-retour) ===
+    try:
+        noms_passagers = [pp["nom"] for t in trajets for pp in t.get("passagers", [])]
+        co2_total_kg = 0.0
+        for nom in noms_passagers:
+            # distance directe domicile -> destination (aller simple)
+            dist_km = get_google_distance_km(coords[nom], coord_dest)
+            # économie = distance * facteur * 2 (A/R)
+            co2_total_kg += dist_km * CO2_PER_KM * 2
+        co2_total_kg = round(co2_total_kg, 2)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur calcul CO2 : {e}")
+
+    return {
+        "trajets": trajets,
+        "co2_economise_kg": co2_total_kg,
+        "co2_facteur_kg_km": CO2_PER_KM
+    }
 
