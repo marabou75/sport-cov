@@ -6,13 +6,16 @@ import requests
 import os
 from dotenv import load_dotenv
 from functools import lru_cache
+from itertools import combinations  # ← NEW
 
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # === CO2: facteur moyen en kg/km (modifiable via env) ===
-# ex: ADEME ~0.192 kg/km ; on garde 0.2 par défaut comme demandé
 CO2_PER_KM = float(os.getenv("CO2_PER_KM", "0.2"))
+
+# === Capacité: max passagers par voiture (hors conducteur) ===
+MAX_PASSENGERS = int(os.getenv("MAX_PASSENGERS", "3"))  # ← NEW
 
 app = FastAPI()
 
@@ -59,7 +62,6 @@ def geocode_address_cached(address: str) -> Tuple[float, float]:
         raise HTTPException(status_code=502, detail=f"Geocode error: {status}")
 
 def geocode_address(address: str) -> Tuple[float, float]:
-    """Wrapper qui gère les erreurs et normalise l'adresse."""
     try:
         lng, lat = geocode_address_cached(address.strip())
         return (lng, lat)
@@ -85,7 +87,6 @@ def get_google_duration(origin: Tuple[float, float], destination: Tuple[float, f
     else:
         raise Exception(f"Google Directions error: {data['status']}")
 
-# === CO2: distance en km entre 2 points, via Google Directions ===
 @lru_cache(maxsize=256)
 def get_google_distance_km(origin: Tuple[float, float], destination: Tuple[float, float]) -> float:
     """Retourne la distance (en km) entre 2 points (lng, lat)."""
@@ -141,6 +142,7 @@ async def optimiser_trajets(data: InputData):
 
         for conducteur_candidat in list(non_assignes):
             try:
+                # 1) Qui est "compatible" avec ce conducteur selon la rallonge
                 passagers_compatibles = []
                 for autre in non_assignes:
                     if autre == conducteur_candidat:
@@ -151,23 +153,29 @@ async def optimiser_trajets(data: InputData):
                     if duree_total <= seuil_rallonge * durees_directes[conducteur_candidat]:
                         passagers_compatibles.append(autre)
 
+                # 2) On construit un "groupe" large et on teste chaque membre comme conducteur
                 groupe = [conducteur_candidat] + passagers_compatibles
+
                 for conducteur in groupe:
-                    passagers = [p for p in groupe if p != conducteur]
-                    points = [coords[conducteur]] + [coords[p] for p in passagers] + [coord_dest]
-                    duree_trajet = sum(get_google_duration(points[i], points[i+1]) for i in range(len(points)-1))
+                    others = [p for p in groupe if p != conducteur]
 
-                    # Logs debug (facultatifs)
-                    # print(f"[DEBUG] Conducteur testé : {conducteur}")
-                    # print(f"[DEBUG] Passagers évalués : {passagers}")
-                    # print(f"[DEBUG] Durée totale du trajet : {duree_trajet/60:.1f} min")
+                    # 3) ***CONTRAINTE CAPACITÉ*** : tester toutes les combinaisons
+                    #    de 0..MAX_PASSENGERS passagers, et prendre la plus rapide
+                    limit = min(MAX_PASSENGERS, len(others))
+                    for k in range(limit, -1, -1):  # on peut commencer par les plus grands groupes
+                        for subset in combinations(others, k):
+                            points = [coords[conducteur]] + [coords[p] for p in subset] + [coord_dest]
+                            duree_trajet = sum(
+                                get_google_duration(points[i], points[i+1]) for i in range(len(points)-1)
+                            )
+                            if duree_trajet < duree_min:
+                                duree_min = duree_trajet
+                                meilleur_scenario = {
+                                    "conducteur": conducteur,
+                                    "passagers": list(subset)  # max 3
+                                }
 
-                    if duree_trajet < duree_min:
-                        duree_min = duree_trajet
-                        meilleur_scenario = {"conducteur": conducteur, "passagers": passagers}
-
-            except Exception as e:
-                # print(f"Erreur lors du test de {conducteur_candidat} : {e}")
+            except Exception:
                 continue
 
         if not meilleur_scenario:
@@ -208,15 +216,13 @@ async def optimiser_trajets(data: InputData):
 
             non_assignes -= set(noms)
 
-    # === CO2: calcul de l'économie pour les PASSAGERS uniquement (aller-retour) ===
+    # === CO2: économie pour PASSAGERS uniquement (A/R) ===
     try:
         noms_passagers = [pp["nom"] for t in trajets for pp in t.get("passagers", [])]
         co2_total_kg = 0.0
         for nom in noms_passagers:
-            # distance directe domicile -> destination (aller simple)
-            dist_km = get_google_distance_km(coords[nom], coord_dest)
-            # économie = distance * facteur * 2 (A/R)
-            co2_total_kg += dist_km * CO2_PER_KM * 2
+            dist_km = get_google_distance_km(coords[nom], coord_dest)  # aller simple
+            co2_total_kg += dist_km * CO2_PER_KM * 2  # A/R
         co2_total_kg = round(co2_total_kg, 2)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur calcul CO2 : {e}")
@@ -224,6 +230,7 @@ async def optimiser_trajets(data: InputData):
     return {
         "trajets": trajets,
         "co2_economise_kg": co2_total_kg,
-        "co2_facteur_kg_km": CO2_PER_KM
+        "co2_facteur_kg_km": CO2_PER_KM,
+        "max_passagers_par_voiture": MAX_PASSENGERS  # optionnel mais pratique
     }
 
