@@ -1,3 +1,7 @@
+# 1) en haut du fichier (imports/constantes)
+from itertools import combinations
+MAX_PASSENGERS = int(os.getenv("MAX_PASSENGERS", "3"))
+
 # ... imports + constantes identiques (CO2_PER_KM, MAX_PASSENGERS, etc.)
 
 @app.post("/optimiser_direct")
@@ -75,5 +79,5 @@ async def optimiser_trajets(data: InputData):
             conducteur = meilleur_scenario["conducteur"]
             passagers = meilleur_scenario["passagers"]
             noms = [conducteur] + passagers
-            adresses = [infos_participants[n]_]()
+            adresses = [infos_participants[n]["address"] for n in noms] + [destination]
 
