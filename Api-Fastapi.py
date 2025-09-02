@@ -20,7 +20,7 @@ CO2_PER_KM = float(os.getenv("CO2_PER_KM", "0.2"))
 MAX_PASSENGERS = int(os.getenv("MAX_PASSENGERS", "3"))
 
 # Coefficient de “rallonge” acceptable pour considérer un passager compatible
-SEUIL_RALLONGE = float(os.getenv("SEUIL_RALLONGE", "2.3"))
+SEUIL_RALLONGE = float(os.getenv("SEUIL_RALLONGE", "1.8"))
 
 app = FastAPI()
 
