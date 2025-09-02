@@ -131,7 +131,7 @@ async def optimiser_trajets(data: InputData):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur de calcul des durées directes : {e}")
 
-    seuil_rallonge = 2
+    seuil_rallonge = 2.3
     non_assignes = set(p.name for p in participants)
     trajets = []
 
