@@ -155,88 +155,61 @@ async def optimiser_trajets(data: InputData):
 
     # On itère tant qu'il reste des non assignés
     while non_assignes:
-        meilleur_scenario = None
-        best_passengers_count = -1
-        best_duration = float("inf")
+        # --- NOUVEAU : choisir le conducteur le plus loin (en durée) de la destination
+        conducteur = max(non_assignes, key=lambda n: durees_directes[n])
 
-        for conducteur_candidat in list(non_assignes):
-            try:
-                # 1) Passagers compatibles selon la rallonge du conducteur_candidat
-                passagers_compatibles = []
-                for autre in non_assignes:
-                    if autre == conducteur_candidat:
-                        continue
-                    duree_aller = get_google_duration(coords[conducteur_candidat], coords[autre])
-                    duree_retour = get_google_duration(coords[autre], coord_dest)
-                    if (duree_aller + duree_retour) <= SEUIL_RALLONGE * durees_directes[conducteur_candidat]:
-                        passagers_compatibles.append(autre)
-
-                # 2) Essayer chaque membre comme conducteur (pour couvrir les tours)
-                groupe = [conducteur_candidat] + passagers_compatibles
-                for conducteur in groupe:
-                    others = [p for p in groupe if p != conducteur]
-                    limit = min(MAX_PASSENGERS, len(others))
-
-                    # 3) Tester toutes les combinaisons de passagers (k = limit -> 0)
-                    for k in range(limit, -1, -1):
-                        for subset in combinations(others, k):
-                            # Trajet: conducteur -> passagers (dans cet ordre) -> destination
-                            points = [coords[conducteur]] + [coords[p] for p in subset] + [coord_dest]
-                            duree_trajet = sum(
-                                get_google_duration(points[i], points[i + 1]) for i in range(len(points) - 1)
-                            )
-
-                            # Priorité : (1) plus de passagers ; (2) durée plus courte
-                            if (k > best_passengers_count) or (k == best_passengers_count and duree_trajet < best_duration):
-                                best_passengers_count = k
-                                best_duration = duree_trajet
-                                meilleur_scenario = {"conducteur": conducteur, "passagers": list(subset)}
-            except Exception:
+        # 1) Passagers compatibles selon la rallonge du conducteur choisi
+        passagers_compatibles = []
+        for autre in non_assignes:
+            if autre == conducteur:
                 continue
+            duree_aller = get_google_duration(coords[conducteur], coords[autre])
+            duree_retour = get_google_duration(coords[autre], coord_dest)
+            if (duree_aller + duree_retour) <= SEUIL_RALLONGE * durees_directes[conducteur]:
+                passagers_compatibles.append(autre)
 
-        # 4) Construction du trajet et sortie du/ des assignés
-        if not meilleur_scenario:
-            # personne compatible → le candidat part seul
-            seul = non_assignes.pop()
-            adresse = infos_participants[seul]["address"]
-            trajets.append(
-                {
-                    "voiture": f"Voiture {len(trajets) + 1}",
-                    "conducteur": seul,
-                    "email_conducteur": infos_participants[seul]["email"],
-                    "telephone_conducteur": infos_participants[seul]["telephone"],
-                    "passagers": [],
-                    "ordre": f"{adresse} → {destination}",
-                    "google_maps": create_google_maps_link([adresse, destination]),
-                }
-            )
-        else:
-            conducteur = meilleur_scenario["conducteur"]
-            passagers = meilleur_scenario["passagers"]
-            noms = [conducteur] + passagers
-            adresses = [infos_participants[n]["address"] for n in noms] + [destination]
+        # 2) Chercher la meilleure combinaison de passagers pour CE conducteur (≤ MAX_PASSENGERS)
+        best_subset = []
+        best_k = -1
+        best_duration = float("inf")
+        limit = min(MAX_PASSENGERS, len(passagers_compatibles))
 
-            trajets.append(
-                {
-                    "voiture": f"Voiture {len(trajets) + 1}",
-                    "conducteur": conducteur,
-                    "email_conducteur": infos_participants[conducteur]["email"],
-                    "telephone_conducteur": infos_participants[conducteur]["telephone"],
-                    "passagers": [
-                        {
-                            "nom": p,
-                            "marche": False,
-                            "email": infos_participants[p]["email"],
-                            "telephone": infos_participants[p]["telephone"],
-                        }
-                        for p in passagers
-                    ],
-                    "ordre": " → ".join(adresses),
-                    "google_maps": create_google_maps_link(adresses),
-                }
-            )
+        for k in range(limit, -1, -1):  # privilégier plus de passagers
+            for subset in combinations(passagers_compatibles, k):
+                points = [coords[conducteur]] + [coords[p] for p in subset] + [coord_dest]
+                duree_trajet = sum(
+                    get_google_duration(points[i], points[i + 1]) for i in range(len(points) - 1)
+                )
+                if (k > best_k) or (k == best_k and duree_trajet < best_duration):
+                    best_k = k
+                    best_duration = duree_trajet
+                    best_subset = list(subset)
 
-            non_assignes -= set(noms)
+        # 3) Construire le trajet et retirer les assignés
+        noms = [conducteur] + best_subset
+        adresses = [infos_participants[n]["address"] for n in noms] + [destination]
+
+        trajets.append(
+            {
+                "voiture": f"Voiture {len(trajets) + 1}",
+                "conducteur": conducteur,
+                "email_conducteur": infos_participants[conducteur]["email"],
+                "telephone_conducteur": infos_participants[conducteur]["telephone"],
+                "passagers": [
+                    {
+                        "nom": p,
+                        "marche": False,
+                        "email": infos_participants[p]["email"],
+                        "telephone": infos_participants[p]["telephone"],
+                    }
+                    for p in best_subset
+                ],
+                "ordre": " → ".join(adresses),
+                "google_maps": create_google_maps_link(adresses),
+            }
+        )
+
+        non_assignes -= set(noms)
 
     # ---- CO2 économisé par les PASSAGERS uniquement (A/R) ----
     try:
