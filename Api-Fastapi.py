@@ -19,7 +19,7 @@ CO2_PER_KM = float(os.getenv("CO2_PER_KM", "0.2"))
 # Limite de passagers par voiture (par défaut 3)
 MAX_PASSENGERS = int(os.getenv("MAX_PASSENGERS", "3"))
 
-# Coefficient de “rallonge” acceptable pour considérer un passager compatible
+# Coefficient de “rallonge” acceptable (max multiplicateur de durée pour le conducteur)
 SEUIL_RALLONGE = float(os.getenv("SEUIL_RALLONGE", "1.8"))
 
 app = FastAPI()
@@ -29,7 +29,6 @@ def check_api_key():
     if not GOOGLE_API_KEY:
         raise RuntimeError("GOOGLE_API_KEY manquante (variable d'environnement).")
 
-
 # ---- Modèles ----
 class Participant(BaseModel):
     name: str
@@ -37,21 +36,17 @@ class Participant(BaseModel):
     email: str = ""
     telephone: str = ""
 
-
 class InputData(BaseModel):
     participants: List[Participant]
     destination: str
-
 
 # ---- Helpers Google ----
 @lru_cache(maxsize=128)
 def geocode_address_cached(address: str) -> Tuple[float, float]:
     if not GOOGLE_API_KEY:
         raise HTTPException(status_code=500, detail="GOOGLE_API_KEY manquante.")
-
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"address": address, "key": GOOGLE_API_KEY}
-
     try:
         resp = requests.get(url, params=params, timeout=8)
         resp.raise_for_status()
@@ -59,10 +54,8 @@ def geocode_address_cached(address: str) -> Tuple[float, float]:
         raise HTTPException(status_code=504, detail=f"Timeout géocodage pour '{address}'")
     except requests.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Échec appel Google Geocode: {e}")
-
     data = resp.json()
     status = data.get("status", "UNKNOWN")
-
     if status == "OK" and data.get("results"):
         loc = data["results"][0]["geometry"]["location"]
         return (loc["lng"], loc["lat"])  # (lng, lat)
@@ -70,7 +63,6 @@ def geocode_address_cached(address: str) -> Tuple[float, float]:
         raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
     else:
         raise HTTPException(status_code=502, detail=f"Geocode error: {status}")
-
 
 def geocode_address(address: str) -> Tuple[float, float]:
     try:
@@ -80,7 +72,6 @@ def geocode_address(address: str) -> Tuple[float, float]:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur geocodage '{address}' : {e}")
-
 
 @lru_cache(maxsize=256)
 def get_google_duration(origin: Tuple[float, float], destination: Tuple[float, float]) -> int:
@@ -98,7 +89,6 @@ def get_google_duration(origin: Tuple[float, float], destination: Tuple[float, f
         return data["routes"][0]["legs"][0]["duration"]["value"]
     else:
         raise Exception(f"Google Directions error: {data['status']}")
-
 
 @lru_cache(maxsize=256)
 def get_google_distance_km(origin: Tuple[float, float], destination: Tuple[float, float]) -> float:
@@ -118,7 +108,6 @@ def get_google_distance_km(origin: Tuple[float, float], destination: Tuple[float
     else:
         raise Exception(f"Google Directions error: {data['status']}")
 
-
 def create_google_maps_link(adresses: List[str]) -> str:
     if len(adresses) < 2:
         return ""
@@ -126,7 +115,6 @@ def create_google_maps_link(adresses: List[str]) -> str:
     destination = urllib.parse.quote(adresses[-1])
     waypoints = "|".join(urllib.parse.quote(adr) for adr in adresses[1:-1])
     return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
-
 
 # ---- Endpoint principal ----
 @app.post("/optimiser_direct")
@@ -138,7 +126,7 @@ async def optimiser_trajets(data: InputData):
     }
     destination = data.destination
 
-    # Géocodage + durées directes
+    # 1) Géocodage + durées directes
     try:
         coords = {p.name: geocode_address(p.address) for p in participants}
         coord_dest = geocode_address(destination)
@@ -153,12 +141,12 @@ async def optimiser_trajets(data: InputData):
     non_assignes = set(p.name for p in participants)
     trajets: List[dict] = []
 
-    # On itère tant qu'il reste des non assignés
+    # 2) Tant qu'il reste des non assignés
     while non_assignes:
-        # --- NOUVEAU : choisir le conducteur le plus loin (en durée) de la destination
+        # a) Conducteur = le plus loin (en durée) de la destination
         conducteur = max(non_assignes, key=lambda n: durees_directes[n])
 
-        # 1) Passagers compatibles selon la rallonge du conducteur choisi
+        # b) Passagers compatibles individuellement pour ce conducteur
         passagers_compatibles = []
         for autre in non_assignes:
             if autre == conducteur:
@@ -168,7 +156,7 @@ async def optimiser_trajets(data: InputData):
             if (duree_aller + duree_retour) <= SEUIL_RALLONGE * durees_directes[conducteur]:
                 passagers_compatibles.append(autre)
 
-        # 2) Chercher la meilleure combinaison de passagers pour CE conducteur (≤ MAX_PASSENGERS)
+        # c) Meilleure combinaison (≤ MAX_PASSENGERS) en respectant le garde-fou global 1.8×
         best_subset = []
         best_k = -1
         best_duration = float("inf")
@@ -176,16 +164,23 @@ async def optimiser_trajets(data: InputData):
 
         for k in range(limit, -1, -1):  # privilégier plus de passagers
             for subset in combinations(passagers_compatibles, k):
+                # Trajet complet: conducteur -> passagers (dans cet ordre) -> destination
                 points = [coords[conducteur]] + [coords[p] for p in subset] + [coord_dest]
                 duree_trajet = sum(
                     get_google_duration(points[i], points[i + 1]) for i in range(len(points) - 1)
                 )
+
+                # Garde-fou: la durée finale ne doit pas dépasser SEUIL_RALLONGE × direct
+                if duree_trajet > SEUIL_RALLONGE * durees_directes[conducteur]:
+                    continue
+
+                # Priorité: (1) plus de passagers ; (2) durée la plus courte
                 if (k > best_k) or (k == best_k and duree_trajet < best_duration):
                     best_k = k
                     best_duration = duree_trajet
                     best_subset = list(subset)
 
-        # 3) Construire le trajet et retirer les assignés
+        # d) Construire le trajet et retirer les assignés
         noms = [conducteur] + best_subset
         adresses = [infos_participants[n]["address"] for n in noms] + [destination]
 
@@ -211,7 +206,7 @@ async def optimiser_trajets(data: InputData):
 
         non_assignes -= set(noms)
 
-    # ---- CO2 économisé par les PASSAGERS uniquement (A/R) ----
+    # 3) CO2 économisé par les PASSAGERS uniquement (A/R)
     try:
         noms_passagers = [pp["nom"] for t in trajets for pp in t.get("passagers", [])]
         co2_total_kg = 0.0
