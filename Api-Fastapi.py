@@ -19,8 +19,8 @@ CO2_PER_KM = float(os.getenv("CO2_PER_KM", "0.2"))
 # Limite de passagers par voiture (par défaut 3)
 MAX_PASSENGERS = int(os.getenv("MAX_PASSENGERS", "3"))
 
-# Coefficient de “rallonge” acceptable (max multiplicateur de durée pour le conducteur)
-SEUIL_RALLONGE = float(os.getenv("SEUIL_RALLONGE", "1.8"))
+# Seuil de rallonge (par défaut 1.5)
+SEUIL_RALLONGE = float(os.getenv("SEUIL_RALLONGE", "1.5"))
 
 app = FastAPI()
 
@@ -75,7 +75,6 @@ def geocode_address(address: str) -> Tuple[float, float]:
 
 @lru_cache(maxsize=256)
 def get_google_duration(origin: Tuple[float, float], destination: Tuple[float, float]) -> int:
-    """Durée (en secondes) entre 2 points (lng, lat)."""
     url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
         "origin": f"{origin[1]},{origin[0]}",
@@ -92,7 +91,6 @@ def get_google_duration(origin: Tuple[float, float], destination: Tuple[float, f
 
 @lru_cache(maxsize=256)
 def get_google_distance_km(origin: Tuple[float, float], destination: Tuple[float, float]) -> float:
-    """Distance (en km) entre 2 points (lng, lat)."""
     url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
         "origin": f"{origin[1]},{origin[0]}",
@@ -126,7 +124,7 @@ async def optimiser_trajets(data: InputData):
     }
     destination = data.destination
 
-    # 1) Géocodage + durées directes
+    # Géocodage + durées directes
     try:
         coords = {p.name: geocode_address(p.address) for p in participants}
         coord_dest = geocode_address(destination)
@@ -141,12 +139,11 @@ async def optimiser_trajets(data: InputData):
     non_assignes = set(p.name for p in participants)
     trajets: List[dict] = []
 
-    # 2) Tant qu'il reste des non assignés
     while non_assignes:
-        # a) Conducteur = le plus loin (en durée) de la destination
+        # Conducteur = le plus loin en durée
         conducteur = max(non_assignes, key=lambda n: durees_directes[n])
 
-        # b) Passagers compatibles individuellement pour ce conducteur
+        # Passagers compatibles selon rallonge du conducteur
         passagers_compatibles = []
         for autre in non_assignes:
             if autre == conducteur:
@@ -156,31 +153,27 @@ async def optimiser_trajets(data: InputData):
             if (duree_aller + duree_retour) <= SEUIL_RALLONGE * durees_directes[conducteur]:
                 passagers_compatibles.append(autre)
 
-        # c) Meilleure combinaison (≤ MAX_PASSENGERS) en respectant le garde-fou global 1.8×
-        best_subset = []
+        # Meilleure combinaison (≤ MAX_PASSENGERS) + garde-fou durée totale
+        best_subset: List[str] = []
         best_k = -1
         best_duration = float("inf")
         limit = min(MAX_PASSENGERS, len(passagers_compatibles))
 
-        for k in range(limit, -1, -1):  # privilégier plus de passagers
+        for k in range(limit, -1, -1):
             for subset in combinations(passagers_compatibles, k):
-                # Trajet complet: conducteur -> passagers (dans cet ordre) -> destination
                 points = [coords[conducteur]] + [coords[p] for p in subset] + [coord_dest]
-                duree_trajet = sum(
-                    get_google_duration(points[i], points[i + 1]) for i in range(len(points) - 1)
-                )
+                duree_trajet = sum(get_google_duration(points[i], points[i + 1]) for i in range(len(points) - 1))
 
-                # Garde-fou: la durée finale ne doit pas dépasser SEUIL_RALLONGE × direct
+                # Garde-fou : trajet final du conducteur ≤ SEUIL_RALLONGE × trajet direct
                 if duree_trajet > SEUIL_RALLONGE * durees_directes[conducteur]:
                     continue
 
-                # Priorité: (1) plus de passagers ; (2) durée la plus courte
                 if (k > best_k) or (k == best_k and duree_trajet < best_duration):
                     best_k = k
                     best_duration = duree_trajet
                     best_subset = list(subset)
 
-        # d) Construire le trajet et retirer les assignés
+        # Construire le trajet et retirer les assignés
         noms = [conducteur] + best_subset
         adresses = [infos_participants[n]["address"] for n in noms] + [destination]
 
@@ -203,16 +196,15 @@ async def optimiser_trajets(data: InputData):
                 "google_maps": create_google_maps_link(adresses),
             }
         )
-
         non_assignes -= set(noms)
 
-    # 3) CO2 économisé par les PASSAGERS uniquement (A/R)
+    # CO2 économisé (passagers uniquement, A/R)
     try:
         noms_passagers = [pp["nom"] for t in trajets for pp in t.get("passagers", [])]
         co2_total_kg = 0.0
         for nom in noms_passagers:
-            dist_km = get_google_distance_km(coords[nom], coord_dest)  # aller simple
-            co2_total_kg += dist_km * CO2_PER_KM * 2  # A/R
+            dist_km = get_google_distance_km(coords[nom], coord_dest)
+            co2_total_kg += dist_km * CO2_PER_KM * 2
         co2_total_kg = round(co2_total_kg, 2)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur calcul CO2 : {e}")
