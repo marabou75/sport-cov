@@ -198,22 +198,33 @@ async def optimiser_trajets(data: InputData):
         )
         non_assignes -= set(noms)
 
-    # CO2 économisé (passagers uniquement, A/R)
+    # ---- CO2 économisé : par voiture + total (passagers uniquement, A/R) ----
     try:
-        noms_passagers = [pp["nom"] for t in trajets for pp in t.get("passagers", [])]
-        co2_total_kg = 0.0
-        for nom in noms_passagers:
-            dist_km = get_google_distance_km(coords[nom], coord_dest)
-            co2_total_kg += dist_km * CO2_PER_KM * 2
-        co2_total_kg = round(co2_total_kg, 2)
+        co2_par_voiture = []
+
+        for t in trajets:
+            passagers = t.get("passagers", [])
+            co2_v = 0.0
+
+            for pp in passagers:
+                nom = pp.get("nom")
+                if not nom or nom not in coords:
+                    continue
+                dist_km = get_google_distance_km(coords[nom], coord_dest)  # aller simple
+                co2_v += dist_km * CO2_PER_KM * 2  # A/R
+
+            co2_par_voiture.append({
+                "voiture": t.get("voiture", ""),
+                "conducteur": t.get("conducteur", ""),
+                "email_conducteur": t.get("email_conducteur", ""),
+                "nb_passagers": len(passagers),
+                "co2_voiture_kg": round(co2_v, 2),
+            })
+
+        # total = somme des voitures (équivalent à la somme des passagers)
+        co2_total_kg = round(sum(v["co2_voiture_kg"] for v in co2_par_voiture), 2)
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur calcul CO2 : {e}")
 
-    return {
-        "trajets": trajets,
-        "co2_economise_kg": co2_total_kg,
-        "co2_facteur_kg_km": CO2_PER_KM,
-        "max_passagers": MAX_PASSENGERS,
-        "seuil_rallonge": SEUIL_RALLONGE,
-    }
 
