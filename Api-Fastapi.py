@@ -221,10 +221,19 @@ async def optimiser_trajets(data: InputData):
                 "co2_voiture_kg": round(co2_v, 2),
             })
 
-        # total = somme des voitures (équivalent à la somme des passagers)
+        # total = somme des voitures
         co2_total_kg = round(sum(v["co2_voiture_kg"] for v in co2_par_voiture), 2)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur calcul CO2 : {e}")
 
+    # ---- ✅ RÉPONSE ----
+    return {
+        "trajets": trajets,
+        "co2_economise_kg": co2_total_kg,
+        "co2_facteur_kg_km": CO2_PER_KM,
+        "max_passagers": MAX_PASSENGERS,
+        "seuil_rallonge": SEUIL_RALLONGE,
+        "co2_par_voiture": co2_par_voiture,
+    }
 
