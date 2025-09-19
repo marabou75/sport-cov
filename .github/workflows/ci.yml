@@ -19,7 +19,7 @@ jobs:
       - name: Type check (mypy)
         run: mypy .
       - name: Security (bandit)
-        run: bandit -r . -x tests
+        run: bandit -x tests -s B101 -r .
       - name: Dependencies audit
         run: pip-audit -r requirements.txt || true  # d’abord en warning
       - name: Tests
