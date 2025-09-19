@@ -6,3 +6,4 @@ bandit
 pip-audit
 pre-commit
 types-requests
+httpx>=0.27
