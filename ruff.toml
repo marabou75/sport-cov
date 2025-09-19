@@ -4,3 +4,7 @@ target-version = "py312"
 [lint]
 select = ["E","F","I","UP","B","SIM"]
 ignore = []
+
+[lint.per-file-ignores]
+"Api-Fastapi.py" = ["E501", "I001", "UP006", "UP035", "B904"]
+"API-FastAPI.py" = ["E501", "I001", "UP006", "UP035", "B904"]  # au cas où la casse varie
