@@ -1,10 +1,11 @@
+# tests/test_api.py
 import importlib.util
 import os
 
 import requests
 from fastapi.testclient import TestClient
 
-# Clé factice pour passer l'event startup
+# Clé factice pour passer le startup check
 os.environ["GOOGLE_API_KEY"] = "dummy"
 
 # --- Mock Google (geocode + directions) ---
@@ -21,21 +22,32 @@ def fake_get(url, params=None, timeout=8):
         addr = params.get("address", "")
         book = {"A": (47.0, 0.98), "B": (47.01, 0.99), "DEST": (47.02, 1.00)}
         lat, lng = book.get(addr, (47.0, 1.0))
-        return _fake_response({"status": "OK",
-                               "results": [{"geometry": {"location": {"lat": lat, "lng": lng}}}]})
+        return _fake_response({
+            "status": "OK",
+            "results": [{"geometry": {"location": {"lat": lat, "lng": lng}}}],
+        })
     if "directions/json" in url:
-        return _fake_response({"status": "OK",
-                               "routes": [{"legs": [{"duration": {"value": 600},
-                                                     "distance": {"value": 5000}}]}]})
+        return _fake_response({
+            "status": "OK",
+            "routes": [{
+                "legs": [{
+                    "duration": {"value": 600},
+                    "distance": {"value": 5000},
+                }]
+            }]
+        })
     raise AssertionError("URL inattendue")
 
 _requests_get_backup = requests.get
 requests.get = fake_get
 
-# ⚠️ respecte exactement le nom du fichier dans ton repo
+# ⚠️ Mets EXACTEMENT le nom de ton fichier (casse incluse)
 spec = importlib.util.spec_from_file_location("api_module", "Api-Fastapi.py")
+if spec is None or spec.loader is None:
+    raise RuntimeError("Échec du chargement de Api-Fastapi.py")
+
 api_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(api_module)
+spec.loader.exec_module(api_module)  # type: ignore[union-attr]
 
 client = TestClient(api_module.app)
 
@@ -55,5 +67,5 @@ def test_optimiser_direct_minimal():
     t0 = data["trajets"][0]
     assert "conducteur" in t0 and "google_maps" in t0
 
-# restore pour ne pas polluer d'autres tests
+# Restore
 requests.get = _requests_get_backup
