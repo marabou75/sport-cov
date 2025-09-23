@@ -22,12 +22,38 @@ MAX_PASSENGERS = int(os.getenv("MAX_PASSENGERS", "3"))
 # Seuil de rallonge (par défaut 1.5)
 SEUIL_RALLONGE = float(os.getenv("SEUIL_RALLONGE", "1.5"))
 
+# Timeouts & retries (surchargeables via env)
+CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "5.0"))
+READ_TIMEOUT = float(os.getenv("READ_TIMEOUT", "30.0"))
+REQUESTS_TOTAL_RETRIES = int(os.getenv("REQUESTS_TOTAL_RETRIES", "5"))
+REQUESTS_BACKOFF = float(os.getenv("REQUESTS_BACKOFF", "0.7"))
+
 app = FastAPI()
 
 @app.on_event("startup")
 def check_api_key():
     if not GOOGLE_API_KEY:
         raise RuntimeError("GOOGLE_API_KEY manquante (variable d'environnement).")
+
+# ---- Session HTTP robuste (retries + backoff) ----
+from urllib3.util.retry import Retry
+from requests.adapters import HTTPAdapter
+
+session = requests.Session()
+retries = Retry(
+    total=REQUESTS_TOTAL_RETRIES,
+    connect=REQUESTS_TOTAL_RETRIES,
+    read=REQUESTS_TOTAL_RETRIES,
+    backoff_factor=REQUESTS_BACKOFF,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST"],
+    raise_on_status=False,
+)
+adapter = HTTPAdapter(max_retries=retries)
+session.mount("https://", adapter)
+session.mount("http://", adapter)
+
+DEFAULT_TIMEOUT = (CONNECT_TIMEOUT, READ_TIMEOUT)  # (connect, read)
 
 # ---- Modèles ----
 class Participant(BaseModel):
@@ -41,18 +67,18 @@ class InputData(BaseModel):
     destination: str
 
 # ---- Helpers Google ----
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=1024)
 def geocode_address_cached(address: str) -> Tuple[float, float]:
     if not GOOGLE_API_KEY:
         raise HTTPException(status_code=500, detail="GOOGLE_API_KEY manquante.")
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"address": address, "key": GOOGLE_API_KEY}
     try:
-        resp = requests.get(url, params=params, timeout=8)
+        resp = session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
         resp.raise_for_status()
-    except requests.Timeout:
+    except requests.exceptions.Timeout:
         raise HTTPException(status_code=504, detail=f"Timeout géocodage pour '{address}'")
-    except requests.RequestException as e:
+    except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Échec appel Google Geocode: {e}")
     data = resp.json()
     status = data.get("status", "UNKNOWN")
@@ -62,6 +88,7 @@ def geocode_address_cached(address: str) -> Tuple[float, float]:
     elif status == "ZERO_RESULTS":
         raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
     else:
+        # Propager les erreurs Google (OVER_QUERY_LIMIT, REQUEST_DENIED, etc.)
         raise HTTPException(status_code=502, detail=f"Geocode error: {status}")
 
 def geocode_address(address: str) -> Tuple[float, float]:
@@ -73,38 +100,55 @@ def geocode_address(address: str) -> Tuple[float, float]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur geocodage '{address}' : {e}")
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=8192)
 def get_google_duration(origin: Tuple[float, float], destination: Tuple[float, float]) -> int:
     url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
         "origin": f"{origin[1]},{origin[0]}",
         "destination": f"{destination[1]},{destination[0]}",
         "key": GOOGLE_API_KEY,
+        "mode": "driving",
     }
-    response = requests.get(url, params=params, timeout=8)
-    response.raise_for_status()
-    data = response.json()
-    if data["status"] == "OK":
-        return data["routes"][0]["legs"][0]["duration"]["value"]
-    else:
-        raise Exception(f"Google Directions error: {data['status']}")
+    try:
+        response = session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        status = data.get("status")
+        if status == "OK":
+            return data["routes"][0]["legs"][0]["duration"]["value"]
+        # Erreurs “logiques” Google (ex: ZERO_RESULTS) -> 502 côté backend
+        raise HTTPException(status_code=502, detail=f"Google Directions error: {status}")
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="Timeout vers Google Directions")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur Google Directions: {e}")
+    except (KeyError, IndexError):
+        raise HTTPException(status_code=502, detail="Réponse Google Directions invalide")
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=8192)
 def get_google_distance_km(origin: Tuple[float, float], destination: Tuple[float, float]) -> float:
     url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
         "origin": f"{origin[1]},{origin[0]}",
         "destination": f"{destination[1]},{destination[0]}",
         "key": GOOGLE_API_KEY,
+        "mode": "driving",
     }
-    response = requests.get(url, params=params, timeout=8)
-    response.raise_for_status()
-    data = response.json()
-    if data["status"] == "OK":
-        meters = data["routes"][0]["legs"][0]["distance"]["value"]
-        return meters / 1000.0
-    else:
-        raise Exception(f"Google Directions error: {data['status']}")
+    try:
+        response = session.get(url, params=params, timeout=DEFAULT_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        status = data.get("status")
+        if status == "OK":
+            meters = data["routes"][0]["legs"][0]["distance"]["value"]
+            return meters / 1000.0
+        raise HTTPException(status_code=502, detail=f"Google Directions error: {status}")
+    except requests.exceptions.Timeout:
+        raise HTTPException(status_code=504, detail="Timeout vers Google Directions")
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur Google Directions: {e}")
+    except (KeyError, IndexError):
+        raise HTTPException(status_code=502, detail="Réponse Google Directions invalide")
 
 def create_google_maps_link(adresses: List[str]) -> str:
     if len(adresses) < 2:
@@ -113,6 +157,15 @@ def create_google_maps_link(adresses: List[str]) -> str:
     destination = urllib.parse.quote(adresses[-1])
     waypoints = "|".join(urllib.parse.quote(adr) for adr in adresses[1:-1])
     return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
+
+# ---- Endpoint diag pour tester l'egress ----
+@app.get("/_diag/google")
+def diag_google():
+    try:
+        r = session.get("https://maps.googleapis.com/generate_204", timeout=(3, 5))
+        return {"ok": True, "status_code": r.status_code}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Egress KO: {e}")
 
 # ---- Endpoint principal ----
 @app.post("/optimiser_direct")
@@ -128,11 +181,15 @@ async def optimiser_trajets(data: InputData):
     try:
         coords = {p.name: geocode_address(p.address) for p in participants}
         coord_dest = geocode_address(destination)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur géocodage : {e}")
 
     try:
         durees_directes = {p.name: get_google_duration(coords[p.name], coord_dest) for p in participants}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur de calcul des durées directes : {e}")
 
@@ -148,6 +205,7 @@ async def optimiser_trajets(data: InputData):
         for autre in non_assignes:
             if autre == conducteur:
                 continue
+            # Ces 2 appels sont très fréquents → profitent du LRU + retries
             duree_aller = get_google_duration(coords[conducteur], coords[autre])
             duree_retour = get_google_duration(coords[autre], coord_dest)
             if (duree_aller + duree_retour) <= SEUIL_RALLONGE * durees_directes[conducteur]:
@@ -221,9 +279,10 @@ async def optimiser_trajets(data: InputData):
                 "co2_voiture_kg": round(co2_v, 2),
             })
 
-        # total = somme des voitures
         co2_total_kg = round(sum(v["co2_voiture_kg"] for v in co2_par_voiture), 2)
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur calcul CO2 : {e}")
 
@@ -236,4 +295,3 @@ async def optimiser_trajets(data: InputData):
         "seuil_rallonge": SEUIL_RALLONGE,
         "co2_par_voiture": co2_par_voiture,
     }
-
