@@ -13,14 +13,9 @@ from itertools import combinations
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# Facteur CO2 moyen (kg / km). Modifiable via env.
-CO2_PER_KM = float(os.getenv("CO2_PER_KM", "0.2"))
-
-# Limite de passagers par voiture (par défaut 3)
-MAX_PASSENGERS = int(os.getenv("MAX_PASSENGERS", "3"))
-
-# Seuil de rallonge (par défaut 1.5)
-SEUIL_RALLONGE = float(os.getenv("SEUIL_RALLONGE", "1.5"))
+CO2_PER_KM = float(os.getenv("CO2_PER_KM", "0.2"))            # kg/km
+MAX_PASSENGERS = int(os.getenv("MAX_PASSENGERS", "3"))        # passagers max
+SEUIL_RALLONGE = float(os.getenv("SEUIL_RALLONGE", "1.5"))    # facteur x trajet direct
 
 # Timeouts & retries (surchargeables via env)
 CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "5.0"))
@@ -88,7 +83,6 @@ def geocode_address_cached(address: str) -> Tuple[float, float]:
     elif status == "ZERO_RESULTS":
         raise HTTPException(status_code=400, detail=f"Adresse introuvable : {address}")
     else:
-        # Propager les erreurs Google (OVER_QUERY_LIMIT, REQUEST_DENIED, etc.)
         raise HTTPException(status_code=502, detail=f"Geocode error: {status}")
 
 def geocode_address(address: str) -> Tuple[float, float]:
@@ -116,7 +110,6 @@ def get_google_duration(origin: Tuple[float, float], destination: Tuple[float, f
         status = data.get("status")
         if status == "OK":
             return data["routes"][0]["legs"][0]["duration"]["value"]
-        # Erreurs “logiques” Google (ex: ZERO_RESULTS) -> 502 côté backend
         raise HTTPException(status_code=502, detail=f"Google Directions error: {status}")
     except requests.exceptions.Timeout:
         raise HTTPException(status_code=504, detail="Timeout vers Google Directions")
@@ -158,7 +151,7 @@ def create_google_maps_link(adresses: List[str]) -> str:
     waypoints = "|".join(urllib.parse.quote(adr) for adr in adresses[1:-1])
     return f"https://www.google.com/maps/dir/?api=1&origin={origin}&destination={destination}&waypoints={waypoints}"
 
-# ---- Endpoint diag pour tester l'egress ----
+# ---- Endpoint diag ----
 @app.get("/_diag/google")
 def diag_google():
     try:
@@ -167,120 +160,121 @@ def diag_google():
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Egress KO: {e}")
 
-# ---- Endpoint principal ----
+# ---- Endpoint principal (IDs internes) ----
 @app.post("/optimiser_direct")
 async def optimiser_trajets(data: InputData):
     participants = data.participants
-    infos_participants = {
-        p.name: {"email": p.email, "telephone": p.telephone, "address": p.address}
-        for p in participants
-    }
     destination = data.destination
 
-    # Géocodage + durées directes
+    # IDs internes stables (pid = index)
+    indexed = list(enumerate(participants))  # [(pid, Participant), ...]
+
+    infos_participants = {
+        pid: {
+            "name": p.name,
+            "email": p.email,
+            "telephone": p.telephone,
+            "address": p.address,
+        }
+        for pid, p in indexed
+    }
+
+    # Géocodage
     try:
-        coords = {p.name: geocode_address(p.address) for p in participants}
+        coords = {pid: geocode_address(p.address) for pid, p in indexed}
         coord_dest = geocode_address(destination)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur géocodage : {e}")
 
+    # Durées directes
     try:
-        durees_directes = {p.name: get_google_duration(coords[p.name], coord_dest) for p in participants}
+        durees_directes = {pid: get_google_duration(coords[pid], coord_dest) for pid, _ in indexed}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur de calcul des durées directes : {e}")
 
-    non_assignes = set(p.name for p in participants)
+    non_assignes = set(pid for pid, _ in indexed)
     trajets: List[dict] = []
+    trajets_ids: List[List[int]] = []
 
     while non_assignes:
-        # Conducteur = le plus loin en durée
-        conducteur = max(non_assignes, key=lambda n: durees_directes[n])
+        # Conducteur = celui avec la plus grande durée directe
+        conducteur = max(non_assignes, key=lambda pid: durees_directes[pid])
 
         # Passagers compatibles selon rallonge du conducteur
-        passagers_compatibles = []
+        passagers_compatibles: List[int] = []
         for autre in non_assignes:
             if autre == conducteur:
                 continue
-            # Ces 2 appels sont très fréquents → profitent du LRU + retries
             duree_aller = get_google_duration(coords[conducteur], coords[autre])
             duree_retour = get_google_duration(coords[autre], coord_dest)
             if (duree_aller + duree_retour) <= SEUIL_RALLONGE * durees_directes[conducteur]:
                 passagers_compatibles.append(autre)
 
         # Meilleure combinaison (≤ MAX_PASSENGERS) + garde-fou durée totale
-        best_subset: List[str] = []
+        best_subset: List[int] = []
         best_k = -1
         best_duration = float("inf")
         limit = min(MAX_PASSENGERS, len(passagers_compatibles))
 
         for k in range(limit, -1, -1):
             for subset in combinations(passagers_compatibles, k):
-                points = [coords[conducteur]] + [coords[p] for p in subset] + [coord_dest]
+                points = [coords[conducteur]] + [coords[pid] for pid in subset] + [coord_dest]
                 duree_trajet = sum(get_google_duration(points[i], points[i + 1]) for i in range(len(points) - 1))
-
-                # Garde-fou : trajet final du conducteur ≤ SEUIL_RALLONGE × trajet direct
                 if duree_trajet > SEUIL_RALLONGE * durees_directes[conducteur]:
                     continue
-
                 if (k > best_k) or (k == best_k and duree_trajet < best_duration):
                     best_k = k
                     best_duration = duree_trajet
                     best_subset = list(subset)
 
-        # Construire le trajet et retirer les assignés
-        noms = [conducteur] + best_subset
-        adresses = [infos_participants[n]["address"] for n in noms] + [destination]
+        # Construire le trajet
+        pids_trajet = [conducteur] + best_subset
+        adresses = [infos_participants[pid]["address"] for pid in pids_trajet] + [destination]
 
         trajets.append(
             {
                 "voiture": f"Voiture {len(trajets) + 1}",
-                "conducteur": conducteur,
+                "conducteur": infos_participants[conducteur]["name"],
                 "email_conducteur": infos_participants[conducteur]["email"],
                 "telephone_conducteur": infos_participants[conducteur]["telephone"],
                 "passagers": [
                     {
-                        "nom": p,
+                        "nom": infos_participants[pid]["name"],
                         "marche": False,
-                        "email": infos_participants[p]["email"],
-                        "telephone": infos_participants[p]["telephone"],
+                        "email": infos_participants[pid]["email"],
+                        "telephone": infos_participants[pid]["telephone"],
                     }
-                    for p in best_subset
+                    for pid in best_subset
                 ],
                 "ordre": " → ".join(adresses),
                 "google_maps": create_google_maps_link(adresses),
             }
         )
-        non_assignes -= set(noms)
+        trajets_ids.append(pids_trajet)
+        non_assignes -= set(pids_trajet)
 
-    # ---- CO2 économisé : par voiture + total (passagers uniquement, A/R) ----
+    # ---- CO2 économisé : par voiture + total ----
     try:
         co2_par_voiture = []
-
-        for t in trajets:
-            passagers = t.get("passagers", [])
+        for i, t in enumerate(trajets):
+            pids_trajet = trajets_ids[i]
+            passagers_pids = pids_trajet[1:]  # exclut le conducteur
             co2_v = 0.0
-
-            for pp in passagers:
-                nom = pp.get("nom")
-                if not nom or nom not in coords:
-                    continue
-                dist_km = get_google_distance_km(coords[nom], coord_dest)  # aller simple
+            for pid in passagers_pids:
+                dist_km = get_google_distance_km(coords[pid], coord_dest)  # aller simple
                 co2_v += dist_km * CO2_PER_KM * 2  # A/R
-
             co2_par_voiture.append({
-                "voiture": t.get("voiture", ""),
-                "conducteur": t.get("conducteur", ""),
-                "email_conducteur": t.get("email_conducteur", ""),
-                "nb_passagers": len(passagers),
+                "voiture": t["voiture"],
+                "conducteur": t["conducteur"],
+                "email_conducteur": t["email_conducteur"],
+                "nb_passagers": len(passagers_pids),
                 "co2_voiture_kg": round(co2_v, 2),
             })
-
         co2_total_kg = round(sum(v["co2_voiture_kg"] for v in co2_par_voiture), 2)
-
     except HTTPException:
         raise
     except Exception as e:
