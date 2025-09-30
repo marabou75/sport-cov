@@ -289,3 +289,111 @@ async def optimiser_trajets(data: InputData):
         "seuil_rallonge": SEUIL_RALLONGE,
         "co2_par_voiture": co2_par_voiture,
     }
+
+# --- Export PDF (basé sur optimiser_trajets) ---
+from fastapi.responses import FileResponse
+from jinja2 import Template
+from weasyprint import HTML, CSS
+import tempfile
+import datetime
+
+PDF_CSS = """
+@page { size: A4; margin: 18mm; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; font-size: 12pt; }
+h1 { font-size: 22pt; margin: 0 0 12px 0; }
+h2 { font-size: 14pt; margin: 18px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+.table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.table th, .table td { border: 1px solid #ccc; padding: 6px 8px; vertical-align: top; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; border: 1px solid #888; font-size: 10pt; }
+.small { color: #666; font-size: 10pt; }
+a { color: #0645AD; word-break: break-all; }
+.footer { margin-top: 16px; font-size: 10pt; color: #666; }
+.header { display:flex; align-items:center; gap:12px; margin-bottom: 8px; }
+.header img { height: 36px; }
+"""
+
+PDF_TEMPLATE = Template(r"""
+<!doctype html>
+<html lang="fr">
+  <body>
+    <div class="header">
+      {% if logo_url %}<img src="{{ logo_url }}">{% endif %}
+      <div>
+        <h1>Mon équipe — Covoiturage</h1>
+        <div class="small">{{ club_name }} — Généré le {{ now }}</div>
+      </div>
+    </div>
+
+    <h2>Résumé CO₂</h2>
+    <table class="table">
+      <thead><tr><th>Voiture</th><th>Conducteur</th><th>Passagers</th><th>CO₂ économisé (kg)</th></tr></thead>
+      <tbody>
+      {% for v in co2_par_voiture %}
+        <tr>
+          <td>{{ v.voiture }}</td>
+          <td>{{ v.conducteur }}</td>
+          <td>{{ v.nb_passagers }}</td>
+          <td>{{ "%.2f"|format(v.co2_voiture_kg) }}</td>
+        </tr>
+      {% endfor %}
+      <tr>
+        <td colspan="3" style="text-align:right;"><strong>Total</strong></td>
+        <td><strong>{{ "%.2f"|format(co2_total) }}</strong></td>
+      </tr>
+      </tbody>
+    </table>
+
+    {% for t in trajets %}
+      <h2>{{ t.voiture }}</h2>
+      <table class="table">
+        <tr>
+          <th style="width:28%">Conducteur</th>
+          <td>{{ t.conducteur }}{% if t.telephone_conducteur %} — {{ t.telephone_conducteur }}{% endif %}</td>
+        </tr>
+        <tr>
+          <th>Passagers</th>
+          <td>
+            {% if t.passagers %}
+              {% for p in t.passagers %}
+                • {{ p.nom }}{% if p.telephone %} — {{ p.telephone }}{% endif %}<br>
+              {% endfor %}
+            {% else %}
+              Aucun passager
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <th>Itinéraire</th>
+          <td><a href="{{ t.google_maps }}">{{ t.ordre }}</a></td>
+        </tr>
+      </table>
+    {% endfor %}
+
+    <div class="footer">
+      Facteur CO₂: {{ co2_facteur }} kg/km — Passagers max: {{ max_passagers }} — Seuil rallonge: ×{{ seuil_rallonge }}
+    </div>
+  </body>
+</html>
+""")
+
+@app.post("/export_pdf")
+async def export_pdf(data: InputData, club_name: str = "Sport Cov", logo_url: str = ""):
+    # 1) Réutilise ton algo
+    result = await optimiser_trajets(data)
+    # 2) Prépare le HTML via Jinja2
+    html_str = PDF_TEMPLATE.render(
+        now=datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
+        club_name=club_name,
+        logo_url=logo_url,
+        trajets=result["trajets"],
+        co2_par_voiture=result["co2_par_voiture"],
+        co2_total=result["co2_economise_kg"],
+        co2_facteur=result["co2_facteur_kg_km"],
+        max_passagers=result["max_passagers"],
+        seuil_rallonge=result["seuil_rallonge"],
+    )
+    # 3) HTML -> PDF
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    HTML(string=html_str).write_pdf(tmp.name, stylesheets=[CSS(string=PDF_CSS)])
+    return FileResponse(tmp.name, media_type="application/pdf", filename="Mon_equipe_covoiturage.pdf")
+
