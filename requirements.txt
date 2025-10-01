@@ -5,3 +5,8 @@ openrouteservice
 geopy
 python-multipart
 googlemaps
+weasyprint
+jinja2
+urllib3
+requests
+python-dotenv
