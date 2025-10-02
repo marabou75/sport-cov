@@ -23,7 +23,8 @@ jobs:
         run: |
           ruff check . --line-length 120 \
             --ignore B904,UP006,UP035,SIM115 \
-            --per-file-ignores='api_fastapi.py:E402,I001'
+            --per-file-ignores='api_fastapi.py:E402' \
+            --per-file-ignores='api_fastapi.py:I001'
       - name: Type check (mypy)
         run: mypy .
       - name: Security (bandit)
