@@ -59,7 +59,7 @@ def fake_get(url, params=None, timeout=8):
 
 def _load_api_module():
     # ⚠️ mets EXACTEMENT le nom du fichier (casse incluse)
-    spec = importlib.util.spec_from_file_location("api_module", "Api-Fastapi.py")
+    spec = importlib.util.spec_from_file_location("api_module", "api_fastapi.py")
     if spec is None or spec.loader is None:
         raise RuntimeError("Échec du chargement de Api-Fastapi.py")
     module = importlib.util.module_from_spec(spec)
