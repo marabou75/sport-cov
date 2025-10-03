@@ -69,8 +69,8 @@ def _load_api_module():
 
 def test_optimiser_direct_minimal():
     with (
-        patch("requests.get", side_effect=fake_get):
-        patch("api_fastapi.session.get", side_effect=fake_get):
+        patch("requests.get", side_effect=fake_get),
+        patch("api_fastapi.session.get", side_effect=fake_get),
     ):    
         api_module = _load_api_module()
         client = TestClient(api_module.app)
