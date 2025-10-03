@@ -3,8 +3,8 @@ on:
   push:
   pull_request:
   schedule:
-    - cron: "0 5 * * *"   # tous les jours à 05:00 UTC (~07:00 en France l’hiver)
-  workflow_dispatch:       # lancement manuel depuis Actions
+    - cron: "0 5 * * *"   # 1 fois par jour à 05:00 UTC
+  workflow_dispatch:
 
 jobs:
   quality:
@@ -29,23 +29,18 @@ jobs:
       - name: Security (bandit)
         run: bandit -x tests -s B101 -r .
       - name: Dependencies audit
-        run: pip-audit -r requirements.txt || true  # d’abord en warning
+        run: pip-audit -r requirements.txt || true
       - name: Tests
         run: pytest -q
 
-name: Uptime Ping
-on:
-  schedule:
-    - cron: "*/30 * * * *"      # toutes les 30 min (exemple)
-  workflow_dispatch:
-
-
   ping:
+    # Ne lance le ping que lors du cron quotidien OU au déclenchement manuel
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Ping Render
         env:
-          RENDER_HOST: ${{ secrets.RENDER_HOST }}   # <-- secret GitHub
+          RENDER_HOST: ${{ secrets.RENDER_HOST }}
         run: |
           if [ -z "$RENDER_HOST" ]; then
             echo "Secret RENDER_HOST manquant"; exit 1
