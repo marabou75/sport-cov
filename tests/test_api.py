@@ -68,35 +68,31 @@ def _load_api_module():
 
 
 def test_optimiser_direct_minimal():
+    # Charger le module d’abord pour accéder à son 'session'
+    api_module = _load_api_module()
+
+    # Patcher les appels HTTP (requests.get + la session du module)
     with (
         patch("requests.get", side_effect=fake_get),
-        patch("api_fastapi.session.get", side_effect=fake_get),
-    ):    
-        api_module = _load_api_module()
+        patch.object(api_module.session, "get", side_effect=fake_get),
+    ):
         client = TestClient(api_module.app)
 
         payload = {
             "participants": [
-                {
-                    "name": "Alice",
-                    "address": "A",
-                    "email": "a@mail.com",
-                    "telephone": "0600000001",
-                },
-                {
-                    "name": "Bob",
-                    "address": "B",
-                    "email": "b@mail.com",
-                    "telephone": "0600000002",
-                },
+                {"name": "Alice", "address": "A", "email": "a@mail.com", "telephone": "0600000001"},
+                {"name": "Bob",   "address": "B", "email": "b@mail.com", "telephone": "0600000002"},
             ],
             "destination": "DEST",
         }
 
         r = client.post("/optimiser_direct", json=payload)
         assert r.status_code == 200
+
+        # ✅ Conserve tes assertions
         data = r.json()
         assert isinstance(data.get("trajets"), list)
         assert "co2_economise_kg" in data
         t0 = data["trajets"][0]
         assert "conducteur" in t0 and "google_maps" in t0
+
