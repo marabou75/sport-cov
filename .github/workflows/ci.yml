@@ -39,7 +39,7 @@ on:
     - cron: "*/30 * * * *"      # toutes les 30 min (exemple)
   workflow_dispatch:
 
-jobs:
+
   ping:
     runs-on: ubuntu-latest
     steps:
