@@ -1,0 +1,13 @@
+name: Uptime Ping
+on:
+  schedule:
+    - cron: "*/30 * * * *"  # toutes les 30 min
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check API live
+        run: |
+          curl -fsSL https://<TON-HOTE-RENDER>/  >/dev/null

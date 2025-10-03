@@ -1,0 +1,7 @@
+{
+  "destination": "Stade de l'Île d'Or, Amboise",
+  "participants": [
+    {"name":"Paul","address":"10 rue Nationale, Tours","telephone":"+336123"},
+    {"name":"Alice","address":"12 avenue Grammont, Tours","telephone":"+336456"}
+  ]
+}

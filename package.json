@@ -1,0 +1,22 @@
+{
+  "name": "github",
+  "version": "1.0.0",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "cypress": "^15.2.0",
+    "dotenv": "^17.2.2",
+    "imapflow": "^1.0.196",
+    "mailosaur": "^8.8.1",
+    "mailparser": "^3.7.4"
+  }
+}

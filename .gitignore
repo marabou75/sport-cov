@@ -1,5 +1,13 @@
+# Editors / OS
+*.swp
+*.swo
+.DS_Store
+.vscode/
+.idea/
+
 # Ignorer les fichiers sensibles
 .env
+cypress.env.json
 
 # Dossiers d'environnement virtuel
 .venv/
@@ -14,3 +22,15 @@ __pycache__/
 # OS
 .DS_Store
 Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Cypress artefacts
+cypress/videos/
+cypress/screenshots/
+cypress/downloads/
+
+# Fichiers générés
+Mon_equipe_covoiturage.pdf
