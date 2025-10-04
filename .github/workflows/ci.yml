@@ -61,18 +61,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install Node deps
         run: npm ci
 
-      - name: Cypress run against Render
-        uses: cypress-io/github-action@v6
+    # (optionnel) Réveille Render une première fois
+      - name: Warmup
         env:
-          # passe la baseUrl à Cypress via variable d’env
-          CYPRESS_baseUrl: https://${{ secrets.RENDER_HOST }}
+          RENDER_HOST: ${{ secrets.RENDER_HOST }}
+        run: |
+          curl -fsS "https://${RENDER_HOST}/openapi.json" >/dev/null || true
+
+      - name: Cypress (prod)
+        uses: cypress-io/github-action@v6
         with:
-          install: false              # on a déjà fait `npm ci`
-          wait-on: https://${{ secrets.RENDER_HOST }}/ # ou /health
-          wait-on-timeout: 120000     # 120s
-          browser: chrome             # ou laisse par défaut (Electron)
-          # spec: cypress/e2e/**/*.cy.{js,ts}  # (optionnel : restreindre les specs)
+          install: false                    # on a déjà fait "npm ci" plus haut
+          config: baseUrl=https://${{ secrets.RENDER_HOST }}
+          wait-on: "https://${{ secrets.RENDER_HOST }}/openapi.json"
+          wait-on-timeout: 120              # en SECONDES (ex: 120 = 2min)
