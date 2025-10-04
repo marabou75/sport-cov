@@ -73,10 +73,10 @@ jobs:
         run: |
           curl -fsS "https://${RENDER_HOST}/openapi.json" >/dev/null || true
 
-      - name: Cypress (prod)
+      - name: Cypress (PROD - FRONT)
         uses: cypress-io/github-action@v6
         with:
-          install: false                    # on a déjà fait "npm ci" plus haut
-          config: baseUrl=https://${{ secrets.RENDER_HOST }}
-          wait-on: "https://${{ secrets.RENDER_HOST }}/openapi.json"
-          wait-on-timeout: 120              # en SECONDES (ex: 120 = 2min)
+          install: false
+          wait-on: ${{ secrets.FRONT_BASEURL }}         # on attend le FRONT
+          wait-on-timeout: 120000
+          config: baseUrl=${{ secrets.FRONT_BASEURL }}  # baseUrl côté Cypress
