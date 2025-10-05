@@ -52,12 +52,6 @@ jobs:
           echo "✅ Ping OK"
 
   e2e:
-    steps:
-      - name: Check Cypress env present
-        run: |
-          for v in CYPRESS_E2E_LOGIN_EMAIL CYPRESS_GMAIL_USER CYPRESS_GMAIL_APP_PASSWORD; do
-            if [ -z "${!v}" ]; then echo "❌ $v manquant"; exit 1; else echo "✅ $v défini"; fi
-          done
     name: Cypress E2E (Render)
     needs: quality
     runs-on: ubuntu-latest
@@ -68,6 +62,12 @@ jobs:
       CYPRESS_GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Check Cypress env present
+        run: |
+          for v in CYPRESS_E2E_LOGIN_EMAIL CYPRESS_GMAIL_USER CYPRESS_GMAIL_APP_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "❌ $v manquant"; exit 1; else echo "✅ $v défini"; fi
+          done
 
       - uses: actions/setup-node@v4
         with:
