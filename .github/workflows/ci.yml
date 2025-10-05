@@ -34,7 +34,7 @@ jobs:
         run: pytest -q
 
   ping:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    #if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Check API live
@@ -52,9 +52,20 @@ jobs:
           echo "✅ Ping OK"
 
   e2e:
+    steps:
+      - name: Check Cypress env present
+        run: |
+          for v in CYPRESS_E2E_LOGIN_EMAIL CYPRESS_GMAIL_USER CYPRESS_GMAIL_APP_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "❌ $v manquant"; exit 1; else echo "✅ $v défini"; fi
+          done
     name: Cypress E2E (Render)
     needs: quality
     runs-on: ubuntu-latest
+    env:
+    # adapte les clés à ce que tu as trouvé dans e2e.js
+      CYPRESS_E2E_LOGIN_EMAIL:              ${{ secrets.E2E_LOGIN_EMAIL }}
+      CYPRESS_GMAIL_USER:         ${{ secrets.GMAIL_USER }}
+      CYPRESS_GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
