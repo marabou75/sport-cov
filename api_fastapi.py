@@ -17,6 +17,8 @@ CO2_PER_KM = float(os.getenv("CO2_PER_KM", "0.2"))            # kg/km
 MAX_PASSENGERS = int(os.getenv("MAX_PASSENGERS", "3"))        # passagers max
 SEUIL_RALLONGE = float(os.getenv("SEUIL_RALLONGE", "1.5"))    # facteur x trajet direct
 
+LOGO_URL_DEFAULT = os.getenv("LOGO_URL", "").strip()
+
 # Timeouts & retries (surchargeables via env)
 CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "5.0"))
 READ_TIMEOUT = float(os.getenv("READ_TIMEOUT", "30.0"))
@@ -378,6 +380,7 @@ PDF_TEMPLATE = Template(r"""
 
 @app.post("/export_pdf")
 async def export_pdf(data: InputData, club_name: str = "Sport Cov", logo_url: str = ""):
+    logo = (logo_url or LOGO_URL_DEFAULT).strip()
     # 1) Réutilise ton algo
     result = await optimiser_trajets(data)
     # 2) Prépare le HTML via Jinja2
