@@ -63,6 +63,38 @@ class InputData(BaseModel):
     participants: List[Participant]
     destination: str
 
+# --- Modèles "sortie" pour export_pdf_from_result (pas d'appels Google) ---
+class Co2Voiture(BaseModel):
+    voiture: str
+    conducteur: str
+    email_conducteur: str = ""
+    nb_passagers: int
+    co2_voiture_kg: float
+
+class TrajetPassager(BaseModel):
+    nom: str
+    marche: bool = False
+    email: str = ""
+    telephone: str = ""
+
+class TrajetOut(BaseModel):
+    voiture: str
+    conducteur: str
+    email_conducteur: str = ""
+    telephone_conducteur: str = ""
+    passagers: List[TrajetPassager] = []
+    ordre: str
+    google_maps: str
+
+class OptimiserResult(BaseModel):
+    trajets: List[TrajetOut]
+    co2_economise_kg: float
+    co2_facteur_kg_km: float
+    max_passagers: int
+    seuil_rallonge: float
+    co2_par_voiture: List[Co2Voiture]
+
+
 # ---- Helpers Google ----
 @lru_cache(maxsize=1024)
 def geocode_address_cached(address: str) -> Tuple[float, float]:
@@ -396,6 +428,28 @@ async def export_pdf(data: InputData, club_name: str = "Sport Cov", logo_url: st
         seuil_rallonge=result["seuil_rallonge"],
     )
     # 3) HTML -> PDF
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    HTML(string=html_str).write_pdf(tmp.name, stylesheets=[CSS(string=PDF_CSS)])
+    return FileResponse(tmp.name, media_type="application/pdf", filename="Mon_equipe_covoiturage.pdf")
+
+@app.post("/export_pdf_from_result")
+async def export_pdf_from_result(
+    result: OptimiserResult,
+    club_name: str = "Sport Cov",
+    logo_url: str = "",
+):
+    """Génère le PDF à partir du JSON déjà calculé par /optimiser_direct (aucun appel Google)."""
+    html_str = PDF_TEMPLATE.render(
+        now=datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
+        club_name=club_name,
+        logo_url=logo_url,
+        trajets=[t.dict() for t in result.trajets],
+        co2_par_voiture=[v.dict() for v in result.co2_par_voiture],
+        co2_total=result.co2_economise_kg,
+        co2_facteur=result.co2_facteur_kg_km,
+        max_passagers=result.max_passagers,
+        seuil_rallonge=result.seuil_rallonge,
+    )
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     HTML(string=html_str).write_pdf(tmp.name, stylesheets=[CSS(string=PDF_CSS)])
     return FileResponse(tmp.name, media_type="application/pdf", filename="Mon_equipe_covoiturage.pdf")
