@@ -351,7 +351,7 @@ PDF_TEMPLATE = Template(r"""
 <html lang="fr">
   <body>
     <div class="header">
-      {% if logo_url %}<img src="{{ logo_url }}">{% endif %}
+      {% if logo_url %}<img src="{{ logo_url }}" style="height:108px">{% endif %}
       <div>
         <h1>{{ team_name }} — Covoiturage</h1>
         <div class="small">Généré le {{ now }}</div>
@@ -359,7 +359,7 @@ PDF_TEMPLATE = Template(r"""
       </div>
     </div>
 
-    <h2>Détail des trajets optimisés</h2>
+    <h1>Détail des trajets optimisés</h1>
     {% for t in trajets %}
       <h2>{{ t.voiture }}</h2>
       <table class="table">
@@ -386,7 +386,7 @@ PDF_TEMPLATE = Template(r"""
       </table>
     {% endfor %}
 
-    <h2>Économie de CO² par voiture</h2>
+    <h1>Économie de CO² par voiture</h1>
     <table class="table">
       <thead><tr><th>Voiture</th><th>Conducteur</th><th>Passagers</th><th>CO₂ économisé (kg)</th></tr></thead>
       <tbody>
