@@ -468,4 +468,9 @@ async def export_pdf_from_result(
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     HTML(string=html_str).write_pdf(tmp.name, stylesheets=[CSS(string=PDF_CSS)])
     return FileResponse(tmp.name, media_type="application/pdf", filename="Mon_equipe_covoiturage.pdf")
+    
+VERSION = "pdf-template V3 (2025-10-07)"
 
+@app.get("/_version")
+def _version():
+    return {"version": VERSION}
