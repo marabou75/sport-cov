@@ -363,6 +363,7 @@ PDF_TEMPLATE = Template(r"""
       <div class="title">
         <h1>{{ team_name or "Mon équipe" }} — Covoiturage V3</h1>
         <div class="small">Généré le {{ now }}</div>
+        <br>
         {% if destination %}<div class="small">Destination : <strong>{{ destination }}</strong></div>{% endif %}
       </div>
     </div>
@@ -393,6 +394,7 @@ PDF_TEMPLATE = Template(r"""
         </tr>
       </table>
     {% endfor %}
+    <br><br>
 
     <h1>Économie de CO² par voiture</h1>
     <table class="table">
@@ -438,6 +440,23 @@ async def export_pdf(data: InputData, club_name: str = "Sport Cov", logo_url: st
         max_passagers=result["max_passagers"],
         seuil_rallonge=result["seuil_rallonge"],
     )
+    
+    PDF_CSS = """
+    @page { size: A4; margin: 18mm; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; font-size: 12pt; }
+    h1 { font-size: 22pt; margin: 0 0 12px 0; }
+    h2 { font-size: 14pt; margin: 18px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+
+    /* ↓↓↓ tableaux plus compacts ↓↓↓ */
+    .table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 10pt; line-height: 1.2; }
+    .table th, .table td { border: 1px solid #ccc; padding: 4px 6px; vertical-align: top; }
+    /* ↑↑↑ tableaux plus compacts ↑↑↑ */
+
+    .small { color: #666; font-size: 10pt; }
+    a { color: #0645AD; word-break: break-all; }
+    .footer { margin-top: 16px; font-size: 10pt; color: #666; }
+    """
+
     # 3) HTML -> PDF
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     HTML(string=html_str).write_pdf(tmp.name, stylesheets=[CSS(string=PDF_CSS)])
