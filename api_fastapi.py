@@ -336,8 +336,11 @@ PDF_CSS = """
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; font-size: 12pt; }
 h1 { font-size: 22pt; margin: 0 0 12px 0; }
 h2 { font-size: 14pt; margin: 18px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-.table { width: 100%; border-collapse: collapse; margin-top: 6px; }
-.table th, .table td { border: 1px solid #ccc; padding: 6px 8px; vertical-align: top; }
+
+/* tableaux plus compacts */
+.table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 10pt; line-height: 1.2; }
+.table th, .table td { border: 1px solid #ccc; padding: 4px 6px; vertical-align: top; }
+
 .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; border: 1px solid #888; font-size: 10pt; }
 .small { color: #666; font-size: 10pt; }
 a { color: #0645AD; word-break: break-all; }
@@ -345,6 +348,7 @@ a { color: #0645AD; word-break: break-all; }
 .header { display:flex; align-items:center; gap:12px; margin-bottom: 8px; }
 .header img { height: 36px; }
 """
+
 
 PDF_TEMPLATE = Template(r"""
 <!doctype html>
@@ -441,21 +445,6 @@ async def export_pdf(data: InputData, club_name: str = "Sport Cov", logo_url: st
         seuil_rallonge=result["seuil_rallonge"],
     )
     
-    PDF_CSS = """
-    @page { size: A4; margin: 18mm; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; font-size: 12pt; }
-    h1 { font-size: 22pt; margin: 0 0 12px 0; }
-    h2 { font-size: 14pt; margin: 18px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
-
-    /* ↓↓↓ tableaux plus compacts ↓↓↓ */
-    .table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 10pt; line-height: 1.2; }
-    .table th, .table td { border: 1px solid #ccc; padding: 4px 6px; vertical-align: top; }
-    /* ↑↑↑ tableaux plus compacts ↑↑↑ */
-
-    .small { color: #666; font-size: 10pt; }
-    a { color: #0645AD; word-break: break-all; }
-    .footer { margin-top: 16px; font-size: 10pt; color: #666; }
-    """
 
     # 3) HTML -> PDF
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
