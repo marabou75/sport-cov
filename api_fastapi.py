@@ -359,13 +359,13 @@ PDF_TEMPLATE = Template(r"""
       </div>
     </div>
 
-    <h2>Détail des trajets optimisés par voiture</h2>
+    <h2>Détail des trajets optimisés</h2>
     {% for t in trajets %}
       <h2>{{ t.voiture }}</h2>
       <table class="table">
         <tr>
           <th style="width:28%">Conducteur</th>
-          <td>{{ t.conducteur }}{% if t.telephone_conducteur %} — {{ t.telephone_conducteur }}{% endif %}</td>
+          <td>{{ t.conducteur }}{% if t.telephone_conducteur %}</td>
         </tr>
         <tr>
           <th>Passagers</th>
@@ -380,13 +380,13 @@ PDF_TEMPLATE = Template(r"""
           </td>
         </tr>
         <tr>
-          <th>Itinéraire</th>
+          <th>Itinéraire (lien Google Maps)</th>
           <td><a href="{{ t.google_maps }}">{{ t.ordre }}</a></td>
         </tr>
       </table>
     {% endfor %}
 
-    <h2>Quantité de CO² par voiture</h2>
+    <h2>Économie de CO² par voiture</h2>
     <table class="table">
       <thead><tr><th>Voiture</th><th>Conducteur</th><th>Passagers</th><th>CO₂ économisé (kg)</th></tr></thead>
       <tbody>
@@ -406,7 +406,7 @@ PDF_TEMPLATE = Template(r"""
     </table>
 
     <div class="footer">
-      Facteur CO₂: {{ co2_facteur }} kg/km — Passagers max: {{ max_passagers }} — Seuil rallonge: ×{{ seuil_rallonge }}
+      Facteur CO₂: {{ co2_facteur }} kg/km
     </div>
   </body>
 </html>
