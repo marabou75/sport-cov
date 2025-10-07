@@ -473,4 +473,11 @@ VERSION = "pdf-template V3 (2025-10-07)"
 
 @app.get("/_version")
 def _version():
-    return {"version": VERSION}
+    # Utile sur Render pour voir le commit déployé
+    git = os.getenv("RENDER_GIT_COMMIT", "") or os.getenv("COMMIT", "")
+    branch = os.getenv("RENDER_GIT_BRANCH", "")
+    return {"version": VERSION, "git": git, "branch": branch}
+
+@app.on_event("startup")
+def print_version():
+    print("### SERVICE VERSION:", VERSION)
