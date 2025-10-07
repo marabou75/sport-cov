@@ -361,7 +361,7 @@ PDF_TEMPLATE = Template(r"""
     <div class="header">
       {% if logo_url %}<div class="logo"><img src="{{ logo_url }}" alt="logo"></div>{% endif %}
       <div class="title">
-        <h1>{{ team_name or "Mon équipe" }} — Covoiturage</h1>
+        <h1>{{ team_name or "Mon équipe" }} — Covoiturage V3</h1>
         <div class="small">Généré le {{ now }}</div>
         {% if destination %}<div class="small">Destination : <strong>{{ destination }}</strong></div>{% endif %}
       </div>
