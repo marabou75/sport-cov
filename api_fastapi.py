@@ -284,7 +284,7 @@ async def optimiser_trajets(data: InputData):
                     }
                     for pid in best_subset
                 ],
-                "ordre": " → ".join(adresses),
+                "ordre": " \u2192 ".join(adresses),
                 "google_maps": create_google_maps_link(adresses),
             }
         )
@@ -337,6 +337,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial
 h1 { font-size: 22pt; margin: 0 0 12px 0; }
 h2 { font-size: 14pt; margin: 18px 0 6px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
 
+/* Empêcher les coupures à l’intérieur d’un bloc voiture */
+.car { break-inside: avoid; page-break-inside: avoid; margin-bottom: 8mm; }
+.car h2 { break-after: avoid; page-break-after: avoid; }
+
+/* Éviter les coupures à l’intérieur des tableaux et de leurs lignes */
+.table, .table tr, .table td, .table th { break-inside: avoid; page-break-inside: avoid; }
+
 /* tableaux plus compacts */
 .table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 10pt; line-height: 1.2; }
 .table th, .table td { border: 1px solid #ccc; padding: 4px 6px; vertical-align: top; }
@@ -348,7 +355,6 @@ a { color: #0645AD; word-break: break-all; }
 .header { display:flex; align-items:center; gap:12px; margin-bottom: 8px; }
 .header img { height: 36px; }
 """
-
 
 PDF_TEMPLATE = Template(r"""
 <!doctype html>
@@ -374,29 +380,31 @@ PDF_TEMPLATE = Template(r"""
 
     <h1>Détail des trajets optimisés</h1>
     {% for t in trajets %}
-      <h2>{{ t.voiture }}</h2>
-      <table class="table">
-        <tr>
-          <th style="width:28%">Conducteur</th>
-          <td>{{ t.conducteur }}</td>
-        </tr>
-        <tr>
-          <th>Passagers</th>
-          <td>
-            {% if t.passagers %}
-              {% for p in t.passagers %}
-                • {{ p.nom }}{% if p.marche %} <span class="badge">à pied</span>{% endif %}<br>
-              {% endfor %}
-            {% else %}
-              Aucun passager
-            {% endif %}
-          </td>
-        </tr>
-        <tr>
-          <th>Itinéraire (lien Google Maps)</th>
-          <td><a href="{{ t.google_maps }}">{{ t.ordre }}</a></td>
-        </tr>
-      </table>
+      <div class="car">
+        <h2>{{ t.voiture }}</h2>
+        <table class="table">
+          <tr>
+            <th style="width:28%">Conducteur</th>
+            <td>{{ t.conducteur }}</td>
+          </tr>
+          <tr>
+            <th>Passagers</th>
+            <td>
+              {% if t.passagers %}
+                {% for p in t.passagers %}
+                  • {{ p.nom }}{% if p.marche %} <span class="badge">à pied</span>{% endif %}<br>
+                {% endfor %}
+              {% else %}
+                Aucun passager
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>Itinéraire (lien Google Maps)</th>
+            <td><a href="{{ t.google_maps }}">{{ t.ordre }}</a></td>
+          </tr>
+        </table>
+      </div>
     {% endfor %}
     <br><br>
 
@@ -426,17 +434,14 @@ PDF_TEMPLATE = Template(r"""
 </html>
 """)
 
-
 @app.post("/export_pdf")
 async def export_pdf(data: InputData, club_name: str = "Sport Cov", logo_url: str = ""):
     logo = (logo_url or LOGO_URL_DEFAULT).strip()
-    # 1) Réutilise ton algo
     result = await optimiser_trajets(data)
-    # 2) Prépare le HTML via Jinja2
     html_str = PDF_TEMPLATE.render(
         now=datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
         club_name=club_name,
-        logo_url=logo_url,
+        logo_url=logo,
         trajets=result["trajets"],
         co2_par_voiture=result["co2_par_voiture"],
         co2_total=result["co2_economise_kg"],
@@ -444,9 +449,6 @@ async def export_pdf(data: InputData, club_name: str = "Sport Cov", logo_url: st
         max_passagers=result["max_passagers"],
         seuil_rallonge=result["seuil_rallonge"],
     )
-    
-
-    # 3) HTML -> PDF
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     HTML(string=html_str).write_pdf(tmp.name, stylesheets=[CSS(string=PDF_CSS)])
     return FileResponse(tmp.name, media_type="application/pdf", filename="Mon_equipe_covoiturage.pdf")
@@ -459,13 +461,12 @@ async def export_pdf_from_result(
     team_name: str = "",
     destination: str = "",
 ):
-    """Génère le PDF à partir du JSON déjà calculé par /optimiser_direct (aucun appel Google)."""
     html_str = PDF_TEMPLATE.render(
         now=datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
         club_name=club_name,
         team_name=team_name,
         destination=destination,
-        logo_url=logo_url or LOGO_URL_DEFAULT,
+        logo_url=(logo_url or LOGO_URL_DEFAULT),
         trajets=[t.dict() for t in result.trajets],
         co2_par_voiture=[v.dict() for v in result.co2_par_voiture],
         co2_total=result.co2_economise_kg,
@@ -476,12 +477,11 @@ async def export_pdf_from_result(
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     HTML(string=html_str).write_pdf(tmp.name, stylesheets=[CSS(string=PDF_CSS)])
     return FileResponse(tmp.name, media_type="application/pdf", filename="Mon_equipe_covoiturage.pdf")
-    
+
 VERSION = "pdf-template V3 (2025-10-07)"
 
 @app.get("/_version")
 def _version():
-    # Utile sur Render pour voir le commit déployé
     git = os.getenv("RENDER_GIT_COMMIT", "") or os.getenv("COMMIT", "")
     branch = os.getenv("RENDER_GIT_BRANCH", "")
     return {"version": VERSION, "git": git, "branch": branch}
@@ -489,3 +489,4 @@ def _version():
 @app.on_event("startup")
 def print_version():
     print("### SERVICE VERSION:", VERSION)
+
