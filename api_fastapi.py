@@ -353,12 +353,40 @@ PDF_TEMPLATE = Template(r"""
     <div class="header">
       {% if logo_url %}<img src="{{ logo_url }}">{% endif %}
       <div>
-        <h1>Mon équipe — Covoiturage</h1>
-        <div class="small">{{ club_name }} — Généré le {{ now }}</div>
+        <h1>{{ team_name }} — Covoiturage</h1>
+        <div class="small">Généré le {{ now }}</div>
+        {% if destination %}<div class="small">Destination : <strong>{{ destination }}</strong></div>{% endif %}
       </div>
     </div>
 
-    <h2>Résumé CO₂</h2>
+    <h2>Détail des trajets optimisés par voiture</h2>
+    {% for t in trajets %}
+      <h2>{{ t.voiture }}</h2>
+      <table class="table">
+        <tr>
+          <th style="width:28%">Conducteur</th>
+          <td>{{ t.conducteur }}{% if t.telephone_conducteur %} — {{ t.telephone_conducteur }}{% endif %}</td>
+        </tr>
+        <tr>
+          <th>Passagers</th>
+          <td>
+            {% if t.passagers %}
+              {% for p in t.passagers %}
+                • {{ p.nom }}{% if p.marche %} <span class="badge">à pied</span>{% endif %}<br>
+              {% endfor %}
+            {% else %}
+              Aucun passager
+            {% endif %}
+          </td>
+        </tr>
+        <tr>
+          <th>Itinéraire</th>
+          <td><a href="{{ t.google_maps }}">{{ t.ordre }}</a></td>
+        </tr>
+      </table>
+    {% endfor %}
+
+    <h2>Quantité de CO² par voiture</h2>
     <table class="table">
       <thead><tr><th>Voiture</th><th>Conducteur</th><th>Passagers</th><th>CO₂ économisé (kg)</th></tr></thead>
       <tbody>
@@ -377,38 +405,13 @@ PDF_TEMPLATE = Template(r"""
       </tbody>
     </table>
 
-    {% for t in trajets %}
-      <h2>{{ t.voiture }}</h2>
-      <table class="table">
-        <tr>
-          <th style="width:28%">Conducteur</th>
-          <td>{{ t.conducteur }}{% if t.telephone_conducteur %} — {{ t.telephone_conducteur }}{% endif %}</td>
-        </tr>
-        <tr>
-          <th>Passagers</th>
-          <td>
-            {% if t.passagers %}
-              {% for p in t.passagers %}
-                • {{ p.nom }}{% if p.telephone %} — {{ p.telephone }}{% endif %}<br>
-              {% endfor %}
-            {% else %}
-              Aucun passager
-            {% endif %}
-          </td>
-        </tr>
-        <tr>
-          <th>Itinéraire</th>
-          <td><a href="{{ t.google_maps }}">{{ t.ordre }}</a></td>
-        </tr>
-      </table>
-    {% endfor %}
-
     <div class="footer">
       Facteur CO₂: {{ co2_facteur }} kg/km — Passagers max: {{ max_passagers }} — Seuil rallonge: ×{{ seuil_rallonge }}
     </div>
   </body>
 </html>
 """)
+
 
 @app.post("/export_pdf")
 async def export_pdf(data: InputData, club_name: str = "Sport Cov", logo_url: str = ""):
@@ -437,12 +440,16 @@ async def export_pdf_from_result(
     result: OptimiserResult,
     club_name: str = "Sport Cov",
     logo_url: str = "",
+    team_name: str = "",
+    destination: str = "",
 ):
     """Génère le PDF à partir du JSON déjà calculé par /optimiser_direct (aucun appel Google)."""
     html_str = PDF_TEMPLATE.render(
         now=datetime.datetime.now().strftime("%d/%m/%Y %H:%M"),
         club_name=club_name,
-        logo_url=logo_url,
+        team_name=team_name,
+        destination=destination,
+        logo_url=logo_url or LOGO_URL_DEFAULT,
         trajets=[t.dict() for t in result.trajets],
         co2_par_voiture=[v.dict() for v in result.co2_par_voiture],
         co2_total=result.co2_economise_kg,
