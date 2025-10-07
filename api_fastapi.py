@@ -349,11 +349,19 @@ a { color: #0645AD; word-break: break-all; }
 PDF_TEMPLATE = Template(r"""
 <!doctype html>
 <html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <style>
+      .header { display:flex; align-items:flex-start; gap:12px; margin-bottom:8px; }
+      .logo { flex:0 0 auto; }
+      .logo img { height:30mm !important; width:auto; display:block; }
+    </style>
+  </head>
   <body>
     <div class="header">
-      {% if logo_url %}<img src="{{ logo_url }}" style="height:30mm; width:auto; display:block;">{% endif %}
-      <div>
-        <h1>{{ team_name }} — Covoiturage</h1>
+      {% if logo_url %}<div class="logo"><img src="{{ logo_url }}" alt="logo"></div>{% endif %}
+      <div class="title">
+        <h1>{{ team_name or "Mon équipe" }} — Covoiturage</h1>
         <div class="small">Généré le {{ now }}</div>
         {% if destination %}<div class="small">Destination : <strong>{{ destination }}</strong></div>{% endif %}
       </div>
