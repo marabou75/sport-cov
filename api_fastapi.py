@@ -373,7 +373,7 @@ PDF_TEMPLATE = Template(r"""
       <table class="table">
         <tr>
           <th style="width:28%">Conducteur</th>
-          <td>{{ t.conducteur }}{% if t.telephone_conducteur %}</td>
+          <td>{{ t.conducteur }}</td>
         </tr>
         <tr>
           <th>Passagers</th>
