@@ -351,7 +351,7 @@ PDF_TEMPLATE = Template(r"""
 <html lang="fr">
   <body>
     <div class="header">
-      {% if logo_url %}<img src="{{ logo_url }}" style="height:108px">{% endif %}
+      {% if logo_url %}<img src="{{ logo_url }}" style="height:324px">{% endif %}
       <div>
         <h1>{{ team_name }} — Covoiturage</h1>
         <div class="small">Généré le {{ now }}</div>
