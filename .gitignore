@@ -34,3 +34,17 @@ cypress/downloads/
 
 # Fichiers générés
 Mon_equipe_covoiturage.pdf
+
+# Next.js
+sportcov-web/.next/
+sportcov-web/node_modules/
+sportcov-web/.turbo/
+
+# Docker volumes
+pg_data/
+redis_data/
+n8n/
+
+# Secrets serveur
+.env.*
+!.env.example

@@ -1,0 +1,101 @@
+services:
+  frontend:
+    build:
+      context: ./sportcov-web
+    container_name: sportcov-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=https://api.sport-cov.fr
+    depends_on:
+      - api
+    networks:
+      - default
+
+  api:
+    build: ./api
+    container_name: sportcov-api
+    env_file:
+      - ./.env.api
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    container_name: n8n-postgres
+    environment:
+      POSTGRES_USER: n8n
+      POSTGRES_PASSWORD: ${DB_POSTGRESDB_PASSWORD}
+      POSTGRES_DB: n8n
+    volumes:
+      - ./pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: n8n-redis
+    volumes:
+      - ./redis_data:/data
+    restart: unless-stopped
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.116.0
+    container_name: n8n
+    environment:
+      - N8N_USER_MANAGEMENT_DISABLED=false
+      - N8N_TRUSTED_PROXIES=loopback,uniquelocal
+      #- N8N_PROXY_HOPS=1
+      #- N8N_HOST=n8n.sport-cov.fr
+      #- N8N_PROTOCOL=https
+      #- WEBHOOK_URL=https://n8n.sport-cov.fr/
+      #- N8N_EDITOR_BASE_URL=https://n8n.sport-cov.fr/
+    env_file:
+      - ./.env
+      - ./.env.n8n
+    volumes:
+      - ./n8n:/home/node/.n8n
+      - ./imports:/data/imports
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+
+  # Cloudflare Tunnel (aucun port ouvert sur ta Freebox)
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    # 🔧 forcer un DNS propre dans CE conteneur
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    # 🔧 si QUIC peine, forcer http2
+    environment:
+      - TUNNEL_TRANSPORT_PROTOCOL=http2
+    restart: unless-stopped
+
+
+  # Monitoring léger
+  # 1) Dozzle = visualisation des logs de tous les conteneurs
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    ports:
+      - "9999:8080"            # accessible sur ton LAN: http://IP:9999
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  # 2) cAdvisor = métriques conteneurs (CPU, RAM, I/O)
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    ports:
+      - "8081:8080"            # http://IP:8081
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped

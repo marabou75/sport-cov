@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+pandas
+openrouteservice
+geopy
+python-multipart
+googlemaps
+weasyprint
+jinja2
+urllib3
+requests
+python-dotenv
+sqlalchemy
+psycopg2-binary
+httpx
+python-jose[cryptography]
+bcrypt
